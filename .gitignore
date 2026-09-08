@@ -1,0 +1,13 @@
+tmp/
+Venv/
+reference/
+opencode.json
+session-*.md
+Untitled.ipynb
+.ipynb_checkpoints/
+__pycache__/
+*.pyc
+.DS_Store
+*.log
+kernel_out/
+kernel_pkg/
