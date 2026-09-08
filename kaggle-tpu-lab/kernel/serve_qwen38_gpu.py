@@ -224,6 +224,14 @@ if have_toolchain:
         engine = "llama-server"
         publish("engine-built", secs=int(time.time() - t), engine="llama-server (source, CUDA)")
         log(f"   built llama-server in {int(time.time() - t)} s")
+        try:
+            dst = WORK / "llama-server"
+            shutil.copy2(LLAMA_SERVER, dst)
+            publish("engine-cached", path=str(dst),
+                    size_gb=round(dst.stat().st_size / 1e9, 2),
+                    note="binary in /kaggle/working -> pullable when kernel completes")
+        except Exception as e:
+            log(f"(engine-cache copy failed: {e})")
     else:
         finish = subprocess.run(["bash", "-lc",
                                  f"tail -20 {RAW_LOG} | grep -Ei 'cmake error|error:' | tail -4"],
@@ -363,9 +371,19 @@ except Exception:
     _vtxt = ""
 _vr = [ln.strip() for ln in _vtxt.splitlines()
        if re.search(r"buffer size =|VRAM used|model size =|KV self size", ln)]
-if _vr:
+_smi = []
+try:
+    _smi_out = subprocess.run(
+        ["nvidia-smi", "--query-gpu=index,name,memory.used,memory.total,utilization.gpu",
+         "--format=csv,noheader,nounits"],
+        capture_output=True, text=True, timeout=20)
+    _smi = [ln.strip() for ln in _smi_out.stdout.splitlines() if ln.strip()]
+except Exception:
+    _smi = []
+if _vr or _smi:
     publish("vram", ctx_size=CFG["ctx_size"], n_parallel=CFG["n_parallel"],
-            kv="q8_0", n_lines=len(_vr), lines="\n".join(_vr[-20:])[-1800:])
+            kv="q8_0", n_lines=len(_vr), lines="\n".join(_vr[-20:])[-1200:],
+            n_smi=len(_smi), smi=_smi)
 log("")
 log("#" * 70)
 log(f"#  READY — the server is live ({elapsed()} after start)")
