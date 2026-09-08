@@ -69,10 +69,11 @@ Ampere+(sm≥8.0), so the T4/P100 leg must run llama.cpp.
 
 | Test | TPU v5e-8 | GPU 2xT4 |
 |---|---|---|
-| Single-stream decode | 126.8 tok/s | 13.6 tok/s |
-| 4 concurrent requests | (vLLM batching) | 4 req / 4.4 s, 0 errors |
+| Context window | 262,144 (vLLM bf16) | 98,304 (Q4_K_M + KV q8_0, 4 parallel slots) |
+| Single-stream decode | 126.8 tok/s | 13.5 tok/s |
+| 4 concurrent requests | (vLLM batching) | 4 req / 4.5 s, 0 errors |
 | Tool-call emission | `list_files({"path":"."})` ✓ | — |
-| Startup to ready | ~20 min (weight load + XLA compile) | ~95 s (weights offload) |
+| Startup to ready | ~20 min (weight load + XLA compile) | ~2 min (weights offload) |
 | Cold start (push → available) | ~25 min | ~31 min (measured v4, see below) |
 
 Locust load test (5 VU, 70 s, mixed stream/sync, 15 realistic prompts — `loadtest/`, `app/locustfile.py`):
