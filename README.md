@@ -73,6 +73,7 @@ Ampere+(sm≥8.0), so the T4/P100 leg must run llama.cpp.
 | 4 concurrent requests | (vLLM batching) | 4 req / 4.4 s, 0 errors |
 | Tool-call emission | `list_files({"path":"."})` ✓ | — |
 | Startup to ready | ~20 min (weight load + XLA compile) | ~95 s (weights offload) |
+| Cold start (push → available) | ~25 min | ~31 min (measured v4, see below) |
 
 Locust load test (5 VU, 70 s, mixed stream/sync, 15 realistic prompts — `loadtest/`, `app/locustfile.py`):
 
@@ -84,6 +85,20 @@ Locust load test (5 VU, 70 s, mixed stream/sync, 15 realistic prompts — `loadt
 | Error rate | 0% | 0% |
 
 Both engines stress-tested with zero failures; TPU ≈ 11-29x faster at low concurrency. Saturation ramp (20-50 VU) is next.
+
+### Cold-start latency (GPU 2xT4, measured 2026-09-08, kernel v4)
+
+| Phase | Duration | Notes |
+|---|---|---|
+| push → kernel RUNNING | ~3 min | Kaggle queue + T4 slot provisioning |
+| weights mount (private dataset) | <10 s | 16.46 GB already on Kaggle storage |
+| llama.cpp source build (cmake, CUDA) | 25 min | i.e. 1511 s — this is the long pole |
+| llama-server load + warmup | 2 min | model 15.3 GiB offload to 2xT4 VRAM |
+| READY | — | 18:42:59, engine-built 18:40:52 |
+
+**push → READY ≈ 31 min.** With the built `llama-server` cached in the private
+dataset (roadmap item 5) the build phase disappears → **~4-6 min** cold start,
+which is why the controller pre-warms the GPU only when needed.
 
 ## Scaling to an enterprise deployment
 
