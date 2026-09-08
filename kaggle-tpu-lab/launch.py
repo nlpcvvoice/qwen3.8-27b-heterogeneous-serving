@@ -149,6 +149,8 @@ def cmd_serve(args):
         "datasets; the endpoint is usually live ~22 min after the kernel starts.")
     say("Watching progress (Ctrl-C is safe — the server keeps running; "
         "`python launch.py status` re-attaches, `... stop` kills it).")
+    if args.no_watch:
+        return
     watch(f"{user}/{slug}", topic)
 
 
@@ -354,6 +356,9 @@ def main():
                    help="skip TPU graph precompile: endpoint live in ~4 min (with the env "
                         "dataset), common request shapes are warmed right after; an "
                         "unusual request shape stalls ~1 min the first time")
+    s.add_argument("--no-watch", action="store_true",
+                   help="push only and exit (controller/scheduler use this); state is "
+                        "written to the state file as usual")
     s.set_defaults(fn=cmd_serve)
 
     s = sub.add_parser("build-env", help="(maintainers) push a kernel that builds the "
