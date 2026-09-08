@@ -74,6 +74,50 @@ Ampere+(sm≥8.0), so the T4/P100 leg must run llama.cpp.
 | Tool-call emission | `list_files({"path":"."})` ✓ | — |
 | Startup to ready | ~20 min (weight load + XLA compile) | ~95 s (weights offload) |
 
+Locust load test (5 VU, 70 s, mixed stream/sync, 15 realistic prompts — `loadtest/`, `app/locustfile.py`):
+
+| Metric | TPU v5e-8 | GPU 2xT4 |
+|---|---|---|
+| RPS | 2.36 | 0.21 |
+| TTFT p50 / p95 | 125 / 172 ms | 2.9 / 9.4 s |
+| End-to-end p50 / p95 | 0.57 / 1.9 s | 16.6 / 37.7 s |
+| Error rate | 0% | 0% |
+
+Both engines stress-tested with zero failures; TPU ≈ 11-29x faster at low concurrency. Saturation ramp (20-50 VU) is next.
+
+## Scaling to an enterprise deployment
+
+This repo runs on Kaggle's free quota (TPU ~20 h/wk, GPU ~30 h/wk, keepalive-limited
+sessions). Every component maps 1:1 onto a paid, production-grade platform — the
+skills exercised here transfer directly:
+
+| Component (this repo) | Enterprise equivalent | Cloud/on-prem tooling |
+|---|---|---|
+| vLLM on TPU v5e | GPU-cluster vLLM / TensorRT-LLM / Triton | AWS SageMaker, KServe + NVIDIA Triton on EKS/GKE |
+| llama.cpp Q4_K_M on 2xT4 | quantized inference at scale (FP8/AWQ/GPTQ), edge variants | ONNX Runtime, TensorRT, Triton, Jetson |
+| Kaggle slot scheduling (`machine_shape`) | right-sized GPU instance pools, spot vs on-demand, autoscaling | K8s HPA/KEDA, SageMaker/Vertex pipelines, Argo/Airflow |
+| ntfy events + local watcher | metrics, alerts, SLO/SLI, on-call | Prometheus + Grafana + Alertmanager, OTel → Datadog/New Relic |
+| local fallback controller/router | gateway routing, canary + shadow, multi-region | LiteLLM proxy, Kong/Tyk, K8s service mesh |
+| private Kaggle dataset (model mirror) | model registry + artifact versioning + rollout gates | MLflow, SageMaker / Vertex Model Registry, HF Hub |
+| cloudflared tunnel + static key | mTLS / private link, WAF, rate limits, IAM/RBAC | API Gateway / ALB, Vault, OIDC |
+| Locust self-run load tests | CI load pipeline, capacity & chaos testing | k6, Guidellm, LLMPerf, Inference Perf, Gremlin |
+| LLM-as-judge + tool-call assertions | eval gates in CI/CD, drift & bias monitoring | DeepEval/promptfoo, Evidently, WhyLabs |
+
+Skill transfer (what interviewers can probe):
+
+| Skill built here | Enterprise application | Evidence in repo |
+|---|---|---|
+| Engine selection & trade-offs (bf16 vs Q4, HW constraints, KV budgeting) | choose deployment stack per cost/latency/quality budget | README tables + `kernel/serve_qwen38_gpu.py` |
+| Quantization & VRAM budgeting (incl. KV-cache math) | FP8/AWQ/GPTQ choices on H100/A100; cache sizing in prod | budget formulas in this README |
+| Heterogeneous scheduling (TPU + GPU via API) | capacity planning, instance right-sizing, failover design | push/probe scripts in `app/` |
+| Failover & health routing | multi-region + gateway routing, SLO enforcement | controller design (roadmap) + watcher scripts |
+| LLM observability planning | prod tracing, cost-per-token, eval dashboards | Langfuse/MLflow plan (roadmap) |
+| Load testing & capacity analysis | capacity reports, saturation-point tuning | `loadtest/` + `app/locustfile.py` |
+
+Business step: in a company the free-time constraints become an SLA
+(99.9%+ availability, autoscaling to zero for dev, per-token cost accounting via
+the observability layer, multi-tenant keys + quotas + guardrails).
+
 ## Reproduce
 
 - Auth: `kaggle_login.py` (reads a local API-token file, in-memory only).
@@ -93,15 +137,16 @@ Secrets never enter this repository: tokens & runtime endpoint keys are kept in
 | Heterogeneous accelerator scheduling (TPU/GPU via API, machine_shape) | push/probe scripts |
 | Tool-call parsing & eval (qwen3_coder style) | TPU eval chain |
 | Failover / health checking | router (roadmap) |
-| Load testing (Locust + persona corpus) | in progress |
+| Load testing (Locust + TTFT/RPS/p95) | `loadtest/` — 5 VU run: TPU 0% error @ TTFT p95 172ms | ✓ |
 | LLM observability (Langfuse/MLflow) | planned |
 | LLM-as-judge evaluation | planned |
 
 ## Roadmap
 
 1. TPU→GPU failover router (local controller)
-2. Load testing with Locust + synthetic persona corpus (QPS/TTFT/p50/p95)
-3. LLM observability (Langfuse/MLflow) + bf16-vs-Q4 eval
-4. Cache prebuilt llama-server binary to skip the 25-min in-kernel build
+2. ~~Load testing~~ ✓ done (Locust, initial 5-VU baseline in `loadtest/`)
+3. Saturation ramp 20-50 VU + LangGraph persona corpus
+4. LLM observability (Langfuse/MLflow) + bf16-vs-Q4 eval
+5. Cache prebuilt llama-server binary to skip the 25-min in-kernel build
 
 `kaggle-tpu-lab/` is derived from [kaggle-tpu-lab](https://github.com/ARahim3/kaggle-tpu-lab) (MIT).
