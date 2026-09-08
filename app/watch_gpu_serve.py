@@ -66,9 +66,14 @@ def render(ev):
     elif phase == "benchmark":
         print(f"  benchmark: {ev.get('decode_tok_s', '?')} tok/s  sanity={ev.get('sanity', '')[:40]!r}")
     elif phase == "vram":
-        print(f"  VRAM ctx={ev.get('ctx_size')} np={ev.get('n_parallel')} KV={ev.get('kv')} ({ev.get('n_lines')} lines)")
+        print(f"  VRAM ctx={ev.get('ctx_size')} np={ev.get('n_parallel')} KV={ev.get('kv')} "
+              f"(llama lines: {ev.get('n_lines', 0)}, nvidia-smi rows: {ev.get('n_smi', 0)})")
         for ln in (ev.get("lines") or "").splitlines()[-8:]:
             print("    " + ln[-120:])
+        for ln in (ev.get("smi") or [])[:4]:
+            print("    smi   " + ln)
+    elif phase == "engine-cached":
+        print(f"  cached built binary: {ev.get('path')}  ({ev.get('size_gb', '?')} GiB) — pullable on kernel completion")
     elif phase == "weights-mounted":
         print("  " + PHASES.get(phase, phase))
     elif phase == "heartbeat":
