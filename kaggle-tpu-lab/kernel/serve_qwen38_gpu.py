@@ -7,6 +7,7 @@ import glob
 import shutil
 import secrets
 import collections
+import threading
 import subprocess
 import urllib.request
 from pathlib import Path
@@ -105,6 +106,40 @@ def publish(phase, **extra):
         log(f"(ntfy publish failed: {e})")
 
 
+def start_control_listener():
+    """Remote kill switch: controller posts a CONTROL message to our ntfy topic;
+    on 'stop' we shut down so the quota frees immediately."""
+    topic = CFG.get("ntfy_topic")
+    if not topic:
+        return
+
+    def _watch():
+        since = int(time.time())
+        while True:
+            try:
+                req = urllib.request.Request(
+                    f"https://ntfy.sh/{topic}/json?poll=1&since={since}",
+                    headers={"Accept": "text/event-stream"})
+                with urllib.request.urlopen(req, timeout=90) as r:
+                    for raw in r:
+                        line = raw.decode().strip()
+                        if not line.startswith('{'):
+                            continue
+                        ev = json.loads(line)
+                        since = max(since, ev.get("time", since))
+                        if ev.get("event") != "message":
+                            continue
+                        msg = json.loads(ev.get("message", "{}"))
+                        if msg.get("phase") == "CONTROL" and msg.get("cmd") == "stop":
+                            log("CONTROL-STOP from controller — shutting down")
+                            publish("auto-shutdown", reason="CONTROL-stop")
+                            os._exit(0)
+            except Exception:
+                time.sleep(10)
+
+    threading.Thread(target=_watch, daemon=True).start()
+
+
 def sh(cmd, tag, show=None):
     show = CFG["verbose"] if show is None else show
     tail = collections.deque(maxlen=40)
@@ -147,6 +182,7 @@ def fetch_cloudflared():
 threading = __import__("threading")
 
 # ---------------- 1. weights ----------------
+start_control_listener()
 banner(1, "Model weights", "Q4_K_M ~16.5 GB GGUF")
 threading.Thread(target=fetch_cloudflared, daemon=True).start()
 weights_slug = CFG["weights_dataset"].split("/")[-1]
