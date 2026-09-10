@@ -12,11 +12,14 @@ Env vars:
   MODEL     model id            (default: qwen3.8-27b)
   MODE      tpu | gpu           (tpu adds chat_template_kwargs for vLLM)
   TTFT_CSV  out csv path        (default: tmp/ttft.csv)
+  PERSONAS  jsonl corpus path   (default: unset -> static PROMPTS)
 """
+import json
 import os
 import csv
 import random
 import time
+from pathlib import Path
 
 from locust import HttpUser, between, task
 
@@ -48,6 +51,32 @@ PROMPTS = [
 ]
 
 with_kt = MODE == "tpu"
+
+
+def _load_personas():
+    path = os.environ.get("PERSONAS")
+    if not path:
+        return []
+    p = Path(path)
+    if not p.exists():
+        raise SystemExit(f"PERSONAS corpus not found: {p}")
+    rows = []
+    for line in p.read_text().splitlines():
+        if not line.strip():
+            continue
+        rows.append(json.loads(line))
+    if not rows:
+        raise SystemExit(f"PERSONAS corpus empty: {p}")
+    return rows
+
+
+PERSONAS = _load_personas()
+
+
+def _prompt_pool():
+    if PERSONAS:
+        return [r["prompt"] for r in PERSONAS]
+    return PROMPTS
 
 
 def _body(prompt, stream):
@@ -104,8 +133,8 @@ class QwenUser(HttpUser):
 
     @task(6)
     def chat_stream(self):
-        self._stream(random.choice(PROMPTS))
+        self._stream(random.choice(_prompt_pool()))
 
     @task(3)
     def chat_sync(self):
-        self._sync(random.choice(PROMPTS))
+        self._sync(random.choice(_prompt_pool()))

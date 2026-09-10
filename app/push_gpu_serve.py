@@ -12,6 +12,13 @@ ROOT = Path(__file__).resolve().parent.parent
 KERNEL_SRC = ROOT / "kaggle-tpu-lab" / "kernel" / "serve_qwen38_gpu.py"
 STATE_FILE = ROOT / "tmp" / "kaggle-gpu-lab.json"
 USER = "tentenshishi"
+CACHE_DATASET = "tentenshishi/llama-server-qwen38-cache"
+
+
+def _dataset_exists(ref: str) -> bool:
+    r = subprocess.run([sys.executable, "-m", "kaggle", "datasets", "status", ref],
+                       capture_output=True, text=True)
+    return r.returncode == 0
 
 
 def main() -> None:
@@ -23,6 +30,13 @@ def main() -> None:
         "weights_dataset": "tentenshishi/qwen3-8-27b-q4-k-m-private",
         "keepalive_min": 1800,  # GPU: 30 h (常驻兜底;配额内按需)
     }
+    dataset_sources = [cfg["weights_dataset"]]
+    if _dataset_exists(CACHE_DATASET):
+        cfg["cache_dataset"] = CACHE_DATASET
+        dataset_sources.append(CACHE_DATASET)
+        print(f"[P3] cache dataset found -> skip 25-min build: {CACHE_DATASET}")
+    else:
+        print(f"[P3] cache dataset not found -> fresh build: {CACHE_DATASET}")
     src = KERNEL_SRC.read_text()
     src, n = re.subn(r"^CFG = None  # __LAUNCHER_CONFIG__.*$",
                      f"CFG = {cfg!r}", src, count=1, flags=re.M)
@@ -44,7 +58,7 @@ def main() -> None:
             "enable_tpu": "false",
             "enable_internet": "true",
             "machine_shape": "NvidiaTeslaT4",
-            "dataset_sources": [cfg["weights_dataset"]],
+            "dataset_sources": dataset_sources,
             "competition_sources": [], "kernel_sources": [], "model_sources": [],
         }, indent=1))
         r = subprocess.run([sys.executable, "-m", "kaggle", "kernels", "push", "-p", str(td)],
