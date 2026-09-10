@@ -1,6 +1,7 @@
 tmp/
 Venv/
 reference/
+p3/reference/
 opencode.json
 session-*.md
 Untitled.ipynb
