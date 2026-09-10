@@ -46,6 +46,9 @@ def read_events(since):
     return evs
 
 
+_registered = {}
+
+
 def render(ev):
     global ENDPOINT
     phase = ev.get("phase")
@@ -63,7 +66,22 @@ def render(ev):
         print(f"  curl {ev.get('endpoint')}/chat/completions -H 'Authorization: Bearer {STATE['api_key']}' \\")
         print("    -H 'Content-Type: application/json' -d '{" +
               '"model": "' + ev.get("model", "qwen3.8-27b") + '", "messages": [{"role": "user", "content": "Hello!"}]}')
+    elif phase == "serving":
+        ep = ENDPOINT or ev.get("endpoint")
+        if ep and ep not in _registered:
+            _registered[ep] = True
+            kl.register_service("gpu", ep, "qwen3.8-27b", STATE["api_key"],
+                                kernel=KID, topic=TOPIC,
+                                ctx_size=ev.get("ctx_size"))
+            print("  serving healthy — registered in tmp/current_services.json")
     elif phase == "benchmark":
+        ep = ENDPOINT or ev.get("endpoint")
+        if ep and ep not in _registered:
+            _registered[ep] = True
+            kl.register_service("gpu", ep, "qwen3.8-27b", STATE["api_key"],
+                                kernel=KID, topic=TOPIC,
+                                ctx_size=ev.get("ctx_size"))
+            print("  benchmark passed — registered in tmp/current_services.json")
         print(f"  benchmark: {ev.get('decode_tok_s', '?')} tok/s  sanity={ev.get('sanity', '')[:40]!r}")
     elif phase == "vram":
         print(f"  VRAM ctx={ev.get('ctx_size')} np={ev.get('n_parallel')} KV={ev.get('kv')} "

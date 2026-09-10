@@ -105,6 +105,44 @@ def verify(api: "object | None" = None) -> dict:
     return result
 
 
+def register_service(engine: str, endpoint: str, model: str, api_key: str,
+                     kernel: str = "", topic: str = "", **extra) -> None:
+    """Atomically record a live OpenAI-compatible endpoint for other machines.
+
+    Writes {engine: {endpoint, api_key, model, ...}} (merged) to
+    ./tmp/current_services.json. Called automatically by the watchers /
+    controller when an engine reaches READY.
+    """
+    if not endpoint or not api_key:
+        return
+    path = _BASE_DIR / "tmp" / "current_services.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    record = {
+        "endpoint": endpoint,
+        "api_key": api_key,
+        "model": model,
+        "kernel": kernel,
+        "topic": topic,
+        "ready_at": None,
+        **extra,
+    }
+    try:
+        import time
+        record["ready_at"] = time.strftime("%Y-%m-%d %H:%M:%S %Z", time.localtime())
+    except Exception:
+        pass
+    try:
+        data = json.loads(path.read_text()) if path.exists() else {}
+    except Exception:
+        data = {}
+    data[engine] = record
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False))
+    tmp.replace(path)
+    path.chmod(0o600)
+    print(f"[services] {engine} registered -> {path}")
+
+
 if __name__ == "__main__":
     import pprint
 

@@ -7,13 +7,18 @@ accelerator backends, with automatic failover TPU → GPU.
 ```
                     clients (opencode, curl, agents...)
                      ┌──────────────┐   OpenAI-compatible /v1
-                     │      router  │   (planned: local controller)
+                     │  controller +│   live: health-check, failover,
+                     │    router    │   auto-registers endpoint/key
                      └──────┬───┬───┘
                     primary │   │ fallback
                             ▼   ▼
    TPU v5e-8 ─── vLLM (bf16, 262k ctx)      GPU 2xT4 ─── llama.cpp (Q4_K_M, llama-server)
-   ~126.8 tok/s · queues 0-3h               ~13.6 tok/s · instant slots
+   ~126.5 tok/s · queues 0-3h               ~13.6 tok/s · instant slots
 ```
+
+Ready endpoints are persisted automatically to `tmp/current_services.json`
+(`app/register_service.py take tpu|gpu` to force-register) — client machines
+just read that one file for `endpoint` + `api_key`.
 
 ## Why / use case
 
@@ -62,7 +67,7 @@ Ampere+(sm≥8.0), so the T4/P100 leg must run llama.cpp.
 | Observability | ntfy event bus + health checks on every startup phase; LLM observability (Langfuse/MLflow) planned |
 | Latency | TTFT/tok-s tracked per run; benchmark gates each deploy |
 | Accuracy drift | scheduled bf16 vs Q4 comparison + LLM-as-judge evals (planned) |
-| Availability | TPU→GPU failover router (planned, repository roadmap) |
+| Availability | TPU→GPU failover controller — **live**: unhealthy→failover, TPU healthy→GPU auto-recycled |
 | Cost & quotas | separate TPU (~20h/wk) and GPU (~30h/wk) free quotas; keepalive-limited sessions |
 
 ## Measured results (2026-09-08)
@@ -86,6 +91,14 @@ Locust load test (5 VU, 70 s, mixed stream/sync, 15 realistic prompts — `loadt
 | Error rate | 0% | 0% |
 
 Both engines stress-tested with zero failures; TPU ≈ 11-29x faster at low concurrency. Saturation ramp (20-50 VU) is next.
+
+### Failover & service registration (verified 2026-09-09)
+
+- Controller polls `healthy()` every loop; on TPU unhealthy → failover to GPU; on
+  TPU healthy → primary auto-switched to TPU and GPU kernel is CONTROL-stopped.
+- On READY (ready/serving/benchmark/heartbeat) the endpoint + api_key are
+  atomically written to `tmp/current_services.json` — any client machine reads
+  that file directly (guarded 600, never logged in plaintext).
 
 ### Cold-start latency (GPU 2xT4, measured 2026-09-08, kernel v4)
 
@@ -140,6 +153,7 @@ the observability layer, multi-tenant keys + quotas + guardrails).
 - Push the TPU kernel: `kaggle-tpu-lab/launch.py` (vLLM + cloudflared tunnel).
 - Push the GPU kernel: `python app/push_gpu_serve.py` (llama.cpp, Q4_K_M).
 - Watch live events: `python app/watch_*.py`.
+- Read the live endpoint/key: `python app/register_service.py status` (or `take tpu|gpu`).
 
 Secrets never enter this repository: tokens & runtime endpoint keys are kept in
 `tmp/` state files and ignored via `.gitignore`.
@@ -152,17 +166,18 @@ Secrets never enter this repository: tokens & runtime endpoint keys are kept in
 | Model optimization (GGUF Q4_K_M, offload, batching) | GPU engine |
 | Heterogeneous accelerator scheduling (TPU/GPU via API, machine_shape) | push/probe scripts |
 | Tool-call parsing & eval (qwen3_coder style) | TPU eval chain |
-| Failover / health checking | router (roadmap) |
+| Failover / health checking | controller — live on TPU+GPU (unhealthy→failover, healthy→recycle) | ✓ |
+| Service endpoint registration | `tmp/current_services.json` + `register_service.py take/status` | ✓ |
 | Load testing (Locust + TTFT/RPS/p95) | `loadtest/` — 5 VU run: TPU 0% error @ TTFT p95 172ms | ✓ |
 | LLM observability (Langfuse/MLflow) | planned |
 | LLM-as-judge evaluation | planned |
 
 ## Roadmap
 
-1. TPU→GPU failover router (local controller)
+1. ~~TPU→GPU failover router~~ ✓ done (live controller, `app/controller.py`)
 2. ~~Load testing~~ ✓ done (Locust, initial 5-VU baseline in `loadtest/`)
 3. Saturation ramp 20-50 VU + LangGraph persona corpus
 4. LLM observability (Langfuse/MLflow) + bf16-vs-Q4 eval
-5. Cache prebuilt llama-server binary to skip the 25-min in-kernel build
+5. Cache prebuilt llama-server binary to skip the 25-min in-kernel build (pull `/kaggle/working` → private dataset)
 
 `kaggle-tpu-lab/` is derived from [kaggle-tpu-lab](https://github.com/ARahim3/kaggle-tpu-lab) (MIT).
