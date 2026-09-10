@@ -42,7 +42,8 @@ APP = ROOT / "app"
 
 ENGINES = {"tpu": {"file": ROOT / "tmp" / "kaggle-tpu-lab.json",
                    "pusher": [sys.executable, str(APP / "run_launch.py"), "serve",
-                              "--no-watch"],
+                              "--no-watch", "--keepalive-min",
+                              str(int(os.environ.get("KTL_TPU_KEEPALIVE_MIN", "540")))],
                    "status": "down", "endpoint": None, "healthy": False,
                    "since": 0, "ready_ts": None, "start_ts": None},
            "gpu": {"file": ROOT / "tmp" / "kaggle-gpu-lab.json",
@@ -62,7 +63,8 @@ POLL = 20
 STOPPED_GRACE = 30  # s before 'stopping' decays to 'down' when no event arrives
 PROTECT_TPU = os.environ.get("KTL_PROTECT_TPU", "1") != "0"  # dev rule: never kill the live TPU
 SIM_FILE = ROOT / "tmp" / "ctl_sim.json"
-TPU_MAX_MIN = int(os.environ.get("KTL_TPU_MAX_MIN", "480"))
+TPU_KEEPALIVE_MIN = int(os.environ.get("KTL_TPU_KEEPALIVE_MIN", "540"))  # 9 h
+TPU_MAX_MIN = int(os.environ.get("KTL_TPU_MAX_MIN", "540"))  # align: TPU LIFETIME = keepalive
 TPU_PREWARM_MIN = int(os.environ.get("KTL_TPU_PREWARM_MIN", "40"))
 TPU_RETRY_MIN = int(os.environ.get("KTL_TPU_RETRY_MIN", "10"))
 PROC = {"tpu": None, "gpu": None}
@@ -86,7 +88,7 @@ def read_events(topic, since):
             continue
         last = max(last, e.get("time", since))
         try:
-            evs.append(e["time"], json.loads(e.get("message", "{}")))
+            evs.append((e["time"], json.loads(e.get("message", "{}"))))
         except Exception:
             continue
     return evs, last
@@ -126,9 +128,34 @@ def read_registered():
             pass
 
 
+def _kaggle_live_status(slug):
+    """Return Kaggle's live kernel status string, or '' on error."""
+    try:
+        r = subprocess.run(
+            [sys.executable, "-c",
+             "import sys;sys.path.insert(0,'.');import kaggle_login as kl;"
+             "kl.login();k=kl.get_kaggle_api();"
+             "s=k.kernels_status('" + slug + "');"
+             "print(getattr(s,'status','') or '')"],
+            capture_output=True, text=True, timeout=30, cwd=str(ROOT))
+        return r.stdout.strip()
+    except Exception:
+        return ""
+
+KERNELS = {"tpu": "tentenshishi/qwen38-tpu-serve",
+           "gpu": "tentenshishi/qwen38-gpu-serve"}
+
+
 def launch(key):
     eng = ENGINES[key]
     if eng["status"] in ("starting", "ready") or PROC[key]:
+        return
+    # pre-flight: if Kaggle already has a QUEUED or RUNNING session, skip
+    live = _kaggle_live_status(KERNELS.get(key, ""))
+    _live = live.rsplit(".", 1)[-1].strip()
+    if _live in ("QUEUED", "RUNNING"):
+        print(f"[skip ] {key} already {_live} on Kaggle — no re-push")
+        eng["status"] = "starting"
         return
     if state["mode"] != "live":
         print(f"[dry] would start {key}: {' '.join(eng['pusher'])}")
@@ -171,6 +198,23 @@ def _sim():
 
 
 # ------------------------------------------------------------------- loop
+def _auto_register(key, eng):
+    """Persist the live endpoint/key for client machines (tmp/current_services.json)."""
+    if not (eng.get("endpoint") and eng.get("api_key")):
+        return
+    if eng.get("_reg_ep") == eng["endpoint"]:
+        return  # already registered this session's endpoint
+    try:
+        sys.path.insert(0, str(ROOT))
+        import kaggle_login as _kl
+        _kl.register_service(key, eng["endpoint"], eng.get("model", "qwen3.8-27b"),
+                             eng["api_key"], kernel=eng.get("kernel", ""),
+                             topic=eng.get("topic", ""))
+        eng["_reg_ep"] = eng["endpoint"]
+    except Exception as exc:  # never break the control loop for a log write
+        print(f"[warn ] auto-register failed: {exc}")
+
+
 def harvest_for(key, evs):
     eng = ENGINES[key]
     for ts, ev in evs:
@@ -179,11 +223,19 @@ def harvest_for(key, evs):
         state["events"][phase] = state["events"].get(phase, 0) + 1
         if phase == "tunnel-url":
             eng["endpoint"] = ev.get("endpoint") or eng.get("endpoint")
-        elif phase == "ready":
+        elif phase in ("ready", "serving", "benchmark"):
             eng["status"] = "ready"
             eng["endpoint"] = ev.get("endpoint") or eng.get("endpoint")
             eng["ready_ts"] = time.time()
             print(f"[event] {key} READY: {eng['endpoint']}")
+            _auto_register(key, eng)
+        elif phase == "heartbeat":
+            eng["endpoint"] = ev.get("endpoint") or eng.get("endpoint")
+            eng["ready_ts"] = eng.get("ready_ts") or time.time()
+            if eng["status"] not in ("ready",):
+                print(f"[event] {key} heartbeat -> live: {eng['endpoint']}")
+                eng["status"] = "ready"
+            _auto_register(key, eng)
         elif phase in TERMINAL:
             eng["status"] = "down"
             eng["endpoint"] = None
@@ -209,11 +261,14 @@ def decide():
         if g["status"] not in ("down", "stopping"):
             stop("gpu")
         return "power-off"
-    # fast engine first on cold start
+    # fast engine first on cold start — but also kick the slow TPU in parallel
     if g["status"] == "down" and t["status"] == "down":
         launch("gpu")
         state["primary"] = "gpu"
-        return "cold: gpu-first"
+        # TPU has no session yet -> launch it now so it's ~22min cold start runs in
+        # the background behind the fast GPU (queue is per-machine-shape anyway)
+        launch("tpu")
+        return "cold: gpu-first (tpu preconditioning in background)"
     # TPU preferred whenever it is ready and healthy
     if t["status"] in ("starting", "ready"):
         if t["status"] == "ready" and t["healthy"]:
@@ -260,7 +315,7 @@ def loop_once():
                     time.time() - eng["stop_ts"] > STOPPED_GRACE:
                 eng["status"] = "down"   # dry-mode / missed-event fallback
                 print(f"[event] {key} assumed down (grace expiry)")
-            if eng.get("topic") and eng["status"] not in ("down", "stopping"):
+            if eng.get("topic"):
                 evs, en = read_events(eng["topic"], eng["since"])
                 harvest_for(key, evs)
                 eng["since"] = max(eng["since"], en)

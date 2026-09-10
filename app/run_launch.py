@@ -16,11 +16,17 @@ import kaggle_login as kl
 ROOT = Path(__file__).resolve().parent.parent
 REPO = ROOT / "kaggle-tpu-lab"
 
-kl.login()  # reads token in memory + exports KAGGLE_API_TOKEN / KAGGLE_CONFIG_DIR
 
-os.environ["KAGGLE_USERNAME"] = "tentenshishi"  # avoids CLI username detection path
+def main() -> None:
+    kl.login()  # reads token in memory + exports KAGGLE_API_TOKEN / KAGGLE_CONFIG_DIR
 
-cmd = [sys.executable, "launch.py", *sys.argv[1:]]
-print("running:", " ".join(cmd))
-r = subprocess.run(cmd, cwd=str(REPO), env=os.environ)
-sys.exit(r.returncode)
+    os.environ["KAGGLE_USERNAME"] = "tentenshishi"  # avoids CLI username detection path
+
+    cmd = [sys.executable, "launch.py", *sys.argv[1:]]
+    print("running:", " ".join(cmd))
+    r = subprocess.run(cmd, cwd=str(REPO), env=os.environ)
+    sys.exit(r.returncode)
+
+
+if __name__ == "__main__":
+    main()

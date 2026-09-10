@@ -145,6 +145,8 @@ def cmd_serve(args):
 
     STATE_FILE.write_text(json.dumps(
         {"kernel": f"{user}/{slug}", "topic": topic, "api_key": api_key}))
+    global _KID, _TOPIC
+    _KID, _TOPIC = f"{user}/{slug}", topic
     say("Pushed. Kaggle takes a few minutes to provision the TPU and attach the "
         "datasets; the endpoint is usually live ~22 min after the kernel starts.")
     say("Watching progress (Ctrl-C is safe — the server keeps running; "
@@ -176,6 +178,10 @@ def read_events(topic, since):
     return events
 
 
+_KID = ""
+_TOPIC = ""  # set by cmd_serve before watch(); used by the ready auto-register
+
+
 def render_event(ev):
     phase = ev.get("phase", "?")
     if phase == "compiling":
@@ -201,6 +207,16 @@ def render_event(ev):
         print(f"  API key  : {ev['api_key']}")
         print(f"  model    : {ev['model']}   (context: {ev.get('max_model_len', '?')})")
         print("=" * 66)
+        # auto-register the live endpoint for client machines
+        try:
+            root = Path(__file__).resolve().parent.parent
+            sys.path.insert(0, str(root))
+            import kaggle_login as _kl
+            _kl.register_service("tpu", ev["endpoint"], ev.get("model", "qwen3.8-27b"),
+                                 ev["api_key"], kernel=_KID, topic=_TOPIC,
+                                 max_model_len=ev.get("max_model_len"))
+        except Exception as exc:
+            print(f"  (service auto-register skipped: {exc})")
         print("""
 Try it:
   curl $BASE/chat/completions -H "Authorization: Bearer $KEY" \\

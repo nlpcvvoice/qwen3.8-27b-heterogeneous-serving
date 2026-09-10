@@ -11,3 +11,6 @@ __pycache__/
 *.log
 kernel_out/
 kernel_pkg/
+package/
+package-*.tar.gz
+关于项目的思考.txt
