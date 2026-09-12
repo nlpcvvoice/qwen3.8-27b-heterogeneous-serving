@@ -44,10 +44,42 @@ def _build_fake_input(root: Path, slug: str, size: int, magic: bytes = b"\x7fELF
     return root / "input"
 
 
+def _build_fake_tar(root: Path, slug: str, size: int = 25_000_000) -> Path:
+    inp = root / "input" / slug
+    inp.mkdir(parents=True, exist_ok=True)
+    tar = inp / "engine.tar.gz"
+    import io
+    import tarfile as tfm
+    with tfm.open(tar, "w:gz") as tf:
+        blob = b"\x7fELF" + b"\x00" * 30_000
+        for name, sz in (("bin/llama-server", len(blob)),
+                         ("bin/libllama-server-impl.so", 4_000_000)):
+            info = tfm.TarInfo(name)
+            info.size = sz
+            tf.addfile(info, io.BytesIO(blob + b"\x00" * (sz - len(blob))))
+    # pad to requested size so the "too small" checks behave predictably
+    if tar.stat().st_size < size:
+        with open(tar, "ab") as f:
+            f.write(b"\x00" * (size - tar.stat().st_size))
+    return tar
+
+
 def decide_engine(input_dir: Path, cache_slug: str | None, force_no_cache: bool = False):
-    """Mirrors the kernel's 2a cache-consume decision."""
+    """Mirrors the kernel's 2a cache-consume decision (tar preferred, legacy fallback)."""
+    cached_tar = None
     cached_bin = None
     if cache_slug and not force_no_cache:
+        for pat in (f"{cache_slug}/engine.tar.gz",
+                    f"datasets/*/{cache_slug}/engine.tar.gz"):
+            for hit in globmod.glob(str(input_dir / pat)):
+                p = Path(hit)
+                if p.is_file() and p.stat().st_size >= 20_000_000:
+                    cached_tar = p
+                    break
+            if cached_tar:
+                break
+        if cached_tar:
+            return "llama-server", "cache-hit", cached_tar
         for pat in (f"{cache_slug}/llama-server",
                     f"datasets/*/{cache_slug}/llama-server"):
             for hit in globmod.glob(str(input_dir / pat)):
@@ -63,13 +95,22 @@ def decide_engine(input_dir: Path, cache_slug: str | None, force_no_cache: bool 
 
 
 def test_local_simulation() -> None:
-    # 1) cache dataset mounted -> cache-hit
+    # 1) cache dataset mounted (tar) -> cache-hit
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        _build_fake_tar(root, CACHE_SLUG)
+        eng, src, hit = decide_engine(root / "input", CACHE_SLUG)
+        assert eng == "llama-server" and src == "cache-hit", (eng, src)
+        assert hit and hit.name == "engine.tar.gz", hit.name if hit else None
+        print("  [local] cache dataset mounted (tar) -> engine=llama-server (cache-hit)  OK")
+
+    # 1b) legacy single-file still hits
     with tempfile.TemporaryDirectory() as td:
         root = Path(td)
         inp = _build_fake_input(root, CACHE_SLUG, 3_000_000)
         eng, src, _ = decide_engine(inp, CACHE_SLUG)
         assert eng == "llama-server" and src == "cache-hit", (eng, src)
-        print("  [local] cache dataset mounted      -> engine=llama-server (cache-hit)  OK")
+        print("  [local] legacy single-file cache      -> engine=llama-server (cache-hit)  OK")
 
     # 2) no cache dataset -> falls to source build
     with tempfile.TemporaryDirectory() as td:
@@ -87,19 +128,27 @@ def test_local_simulation() -> None:
         assert src3 == "source-build", (eng3, src3)
         print("  [local] tiny/garbage binary        -> rejected -> source-build        OK")
 
+    # 3b) tiny tar -> rejected too
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        _build_fake_tar(root, CACHE_SLUG, size=5_000_000)
+        eng3b, src3b, _ = decide_engine(root / "input", CACHE_SLUG)
+        assert src3b == "source-build", (eng3b, src3b)
+        print("  [local] tiny tar                   -> rejected -> source-build        OK")
+
     # 4) force_no_cache flag -> source build
     with tempfile.TemporaryDirectory() as td:
         root = Path(td)
-        inp = _build_fake_input(root, CACHE_SLUG, 3_000_000)
-        eng4, src4, _ = decide_engine(inp, CACHE_SLUG, force_no_cache=True)
+        _build_fake_tar(root, CACHE_SLUG, size=25_000_000)
+        eng4, src4, _ = decide_engine(root / "input", CACHE_SLUG, force_no_cache=True)
         assert src4 == "source-build", (eng4, src4)
         print("  [local] force no-cache flag        -> source-build                   OK")
 
     # 5) datasets/*/<slug> layout (source mount dir style)
     with tempfile.TemporaryDirectory() as td:
         root = Path(td)
-        inp = _build_fake_input(root, f"datasets/someowner/{CACHE_SLUG}", 3_000_000)
-        eng5, src5, _ = decide_engine(inp, CACHE_SLUG)
+        _build_fake_tar(root, f"datasets/someowner/{CACHE_SLUG}", size=25_000_000)
+        eng5, src5, _ = decide_engine(root / "input", CACHE_SLUG)
         assert eng5 == "llama-server" and src5 == "cache-hit", (eng5, src5)
         print("  [local] datasets/*/<slug> layout   -> cache-hit                      OK")
 
@@ -110,6 +159,7 @@ def test_static_assertions() -> None:
     assert ELSE_BUILD_HOOK.search(kernel), "kernel missing 'elif have_toolchain:'"
     assert "engine-cache-hit" in kernel, "kernel missing engine-cache-hit publish"
     assert 'CFG.get("cache_dataset")' in kernel, "kernel must read CFG['cache_dataset']"
+    assert "engine.tar.gz" in kernel, "kernel missing engine.tar.gz (tar cache path)"
     print("  [static] kernel  : skip-compile hook + else-build + cache-hit publish   OK")
 
     if PUSH_SRC.exists():

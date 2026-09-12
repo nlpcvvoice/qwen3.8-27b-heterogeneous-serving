@@ -6,6 +6,7 @@ import time
 import glob
 import shutil
 import secrets
+import tarfile
 import collections
 import threading
 import subprocess
@@ -210,22 +211,61 @@ t = time.time()
 engine = None     # "llama-server" | "wheel"
 
 # --- 2a. cache dataset hit -> skip the ~25 min source build -----------------
+def package_engine(dst: Path) -> "Path | None":
+    """Tar BUILD/bin + BUILD/lib into dst. None if no engine binary."""
+    if not LLAMA_SERVER.exists():
+        return None
+    with tarfile.open(dst, "w:gz") as tf:
+        for sub in ("bin", "lib"):
+            d = BUILD / sub
+            if d.is_dir():
+                for f in sorted(d.iterdir()):
+                    if f.is_file():
+                        tf.add(f, arcname=f"{sub}/{f.name}")
+    return dst
+
+
+def unpack_engine(tar_path: Path) -> None:
+    """Extract a cached engine.tar.gz back onto BUILD (same path -> RUNPATH ok)."""
+    with tarfile.open(tar_path, "r:gz") as tf:
+        try:
+            tf.extractall(BUILD, filter="data")
+        except TypeError:
+            tf.extractall(BUILD)
+    _srv = BUILD / "bin" / "llama-server"
+    if _srv.exists():
+        os.chmod(_srv, 0o755)
+
+
 _cache_slug = (CFG.get("cache_dataset") or "").split("/")[-1]
+_cached_tar = None
 _cached_bin = None
 if _cache_slug:
-    _cached_bin = find_input(f"{_cache_slug}/llama-server")
-    if _cached_bin and os.path.getsize(_cached_bin) < 1_000_000:  # sanity: >1 MB
-        log(f"   cache binary too small, ignoring: {_cached_bin}")
-        _cached_bin = None
-if _cached_bin:
+    _cached_tar = find_input(f"{_cache_slug}/engine.tar.gz")
+    if _cached_tar and os.path.getsize(_cached_tar) < 20_000_000:  # sanity: >20 MB
+        log(f"   cache tar too small, ignoring: {_cached_tar}")
+        _cached_tar = None
+    if not _cached_tar:
+        _cached_bin = find_input(f"{_cache_slug}/llama-server")
+        if _cached_bin and os.path.getsize(_cached_bin) < 1_000_000:  # sanity: >1 MB
+            log(f"   cache binary too small, ignoring: {_cached_bin}")
+            _cached_bin = None
+if _cached_tar or _cached_bin:
     BUILD.mkdir(parents=True, exist_ok=True)
     (BUILD / "bin").mkdir(parents=True, exist_ok=True)
-    shutil.copy2(_cached_bin, LLAMA_SERVER)
-    os.chmod(LLAMA_SERVER, 0o755)
-    engine = "llama-server"
-    publish("engine-cache-hit", secs=int(time.time() - t),
-            src=_cached_bin, size_mb=round(os.path.getsize(_cached_bin) / 1e6, 1),
-            note="skipped the cmake build")
+    if _cached_tar:
+        unpack_engine(_cached_tar)
+        engine = "llama-server"
+        publish("engine-cache-hit", secs=int(time.time() - t),
+                src=_cached_tar.name, size_mb=round(os.path.getsize(_cached_tar) / 1e6, 1),
+                note="tarball (bin+lib): skipped the cmake build")
+    else:
+        shutil.copy2(_cached_bin, LLAMA_SERVER)
+        os.chmod(LLAMA_SERVER, 0o755)
+        engine = "llama-server"
+        publish("engine-cache-hit", secs=int(time.time() - t),
+                src=_cached_bin, size_mb=round(os.path.getsize(_cached_bin) / 1e6, 1),
+                note="legacy single-file: skipped the cmake build")
 
 have_toolchain = all(shutil.which(x) for x in ("cmake", "gcc", "make")) and (
     os.path.isfile("/usr/local/cuda/bin/nvcc") or shutil.which("nvcc") is not None)
@@ -246,13 +286,19 @@ elif have_toolchain:
         publish("engine-built", secs=int(time.time() - t), engine="llama-server (source, CUDA)")
         log(f"   built llama-server in {int(time.time() - t)} s")
         try:
-            dst = WORK / "llama-server"
-            shutil.copy2(LLAMA_SERVER, dst)
-            publish("engine-cached", path=str(dst),
-                    size_gb=round(dst.stat().st_size / 1e9, 2),
-                    note="binary in /kaggle/working -> pullable when kernel completes")
+            eng_tar = package_engine(WORK / "engine.tar.gz")
+            if eng_tar is not None:
+                publish("engine-cached", path=str(eng_tar),
+                        size_mb=round(eng_tar.stat().st_size / 1e6, 1),
+                        note="engine tarball (bin+lib) in /kaggle/working -> pullable when kernel completes")
+            else:
+                dst = WORK / "llama-server"
+                shutil.copy2(LLAMA_SERVER, dst)
+                publish("engine-cached", path=str(dst),
+                        size_mb=round(dst.stat().st_size / 1e6, 1),
+                        note="legacy single-file copy in /kaggle/working -> pullable when kernel completes")
         except Exception as e:
-            log(f"(engine-cache copy failed: {e})")
+            log(f"(engine-cache package failed: {e})")
     else:
         finish = subprocess.run(["bash", "-lc",
                                  f"tail -20 {RAW_LOG} | grep -Ei 'cmake error|error:' | tail -4"],
@@ -303,6 +349,9 @@ def server_args():
 
 
 tail = collections.deque(maxlen=200)
+if engine == "llama-server":
+    _ld = os.environ.get("LD_LIBRARY_PATH", "")
+    os.environ["LD_LIBRARY_PATH"] = f"{BUILD}/bin:{BUILD}/lib" + (f":{_ld}" if _ld else "")
 p = subprocess.Popen(server_args(), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
 
 
