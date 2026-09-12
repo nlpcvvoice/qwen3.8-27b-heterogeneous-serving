@@ -241,7 +241,11 @@ _cache_slug = (CFG.get("cache_dataset") or "").split("/")[-1]
 _cached_tar = None
 _cached_bin = None
 if _cache_slug:
-    _cached_tar = find_input(f"{_cache_slug}/engine.tar.gz")
+    _cached_tar = find_input(f"{_cache_slug}/engine.bundle")
+    if not (_cached_tar and os.path.getsize(_cached_tar) >= 20_000_000):
+        _cached_tar = None
+    if not _cached_tar:
+        _cached_tar = find_input(f"{_cache_slug}/engine.tar.gz")
     if _cached_tar and os.path.getsize(_cached_tar) < 20_000_000:  # sanity: >20 MB
         log(f"   cache tar too small, ignoring: {_cached_tar}")
         _cached_tar = None

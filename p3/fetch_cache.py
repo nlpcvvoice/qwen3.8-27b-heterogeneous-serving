@@ -33,7 +33,7 @@ def main() -> None:
     kl.login()
     with tempfile.TemporaryDirectory() as td:
         r = subprocess.run([sys.executable, "-m", "kaggle", "datasets", "download",
-                            "-d", CACHE_DATASET, "-p", td, "--dir-mode", "zip"],
+                            "-d", CACHE_DATASET, "-p", td],
                            capture_output=True, text=True)
         out = (r.stdout or "") + (r.stderr or "")
         print(out[-1000:])
@@ -51,7 +51,7 @@ def main() -> None:
             expect = None
             if mani:
                 expect = json.loads(z.read(mani[0]))["sha256"]
-            tar_names = [n for n in names if n.endswith("engine.tar.gz")]
+            tar_names = [n for n in names if n.endswith("engine.bundle") or n.endswith("engine.tar.gz")]
             if tar_names:
                 tar_path = args.out / "engine.tar.gz"
                 with z.open(tar_names[0]) as src, open(tar_path, "wb") as dst:
