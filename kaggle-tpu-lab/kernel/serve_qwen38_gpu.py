@@ -261,7 +261,7 @@ if _cached_tar or _cached_bin:
         unpack_engine(_cached_tar)
         engine = "llama-server"
         publish("engine-cache-hit", secs=int(time.time() - t),
-                src=_cached_tar.name, size_mb=round(os.path.getsize(_cached_tar) / 1e6, 1),
+                src=os.path.basename(_cached_tar), size_mb=round(os.path.getsize(_cached_tar) / 1e6, 1),
                 note="tarball (bin+lib): skipped the cmake build")
     else:
         shutil.copy2(_cached_bin, LLAMA_SERVER)
