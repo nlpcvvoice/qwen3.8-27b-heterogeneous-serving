@@ -67,7 +67,7 @@ def main() -> None:
     api = kl.get_kaggle_api()
 
     stage = build_cache_stage(args.engine, want_sha=args.sha or None)
-    sha = sha256_file(stage / "engine.tar.gz")
+    sha = sha256_file(stage / "engine.bundle")
     meta = {
         "id": CACHE_DATASET,
         "title": "llama-server (Qwen3.8-27B) engine cache",

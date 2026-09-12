@@ -51,7 +51,7 @@ def build_cache_stage(artifact: Path, want_sha: str | None = None) -> Path:
     its impl/shared libs (e.g. libllama-server-impl.so, libggml*.so).
     """
     stage = Path(tempfile.mkdtemp(prefix="p3-stage-", dir=sqlite_free_upload_dir()))
-    dst = stage / "engine.tar.gz"
+    dst = stage / "engine.bundle"
     shutil.copy2(artifact, dst)
     sha = want_sha or sha256_file(dst)
     (stage / "manifest.json").write_text(
