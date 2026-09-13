@@ -124,6 +124,27 @@ Both engines stress-tested with zero failures; TPU ≈ 11-29x faster at low conc
 dataset (roadmap item 5) the build phase disappears → **~4-6 min** cold start,
 which is why the controller pre-warms the GPU only when needed.
 
+### Engine factory — containerized offline build (no GPU)
+
+The 25-min "build in the exam room" step can be moved to a **factory**: a
+Docker image (`nvidia/cuda:12.4.0-devel`, nvcc on CPU only) that produces the
+*identical* `engine.tar.gz` (`bin/` + `lib/`, same cmake flags as the in-kernel
+source build) → upload to the private dataset → the same `bootstrap_cache.py`
+and `unpack_engine()` pipeline feeds it in, so kernels boot with
+`engine-cache-hit` (≈instant) even on the first run.
+
+| | In-kernel source build | engine-factory (Docker) |
+|---|---|---|
+| Where | inside the Kaggle kernel (GPU session, card idle) | any CPU machine / CI |
+| Flags | GGML_CUDA=ON / sm_75 / FORCE_DMMV / NATIVE=OFF | identical (see Dockerfile) |
+| Result | `WORK/engine.tar.gz` | `/out/engine.tar.gz` + pinned `engine.sha` |
+| Cost | ~25 min GPU-session + Kaggle resources | local CPU; zero Kaggle quota |
+| Reproducible | depends on build-day deps | same image + commit → identical artifact |
+
+Usage: `kaggle-tpu-lab/engine-factory/build_engine.sh [OUT] [--commit <sha|master>]`
+(details in `engine-factory/README.md`). Print an `engine.sha` for versioning;
+runtime smoke-test on T4 is the only remaining in-kernel check.
+
 ## Three-accelerator benchmark (2026-09-11)
 
 Same Qwen3.8-27B model served through three accelerators — one free TPU class,
@@ -240,6 +261,7 @@ the observability layer, multi-tenant keys + quotas + guardrails).
 - Auth: `kaggle_login.py` (reads a local API-token file, in-memory only).
 - Push the TPU kernel: `kaggle-tpu-lab/launch.py` (vLLM + cloudflared tunnel).
 - Push the GPU kernel: `python app/push_gpu_serve.py` (llama.cpp, Q4_K_M).
+- Prebuild the GPU engine offline (no GPU needed): `kaggle-tpu-lab/engine-factory/build_engine.sh`.
 - Watch live events: `python app/watch_*.py`.
 - Read the live endpoint/key: `python app/register_service.py status` (or `take tpu|gpu`).
 
@@ -258,6 +280,7 @@ Secrets never enter this repository: tokens & runtime endpoint keys are kept in
 | Service endpoint registration | `tmp/current_services.json` + `register_service.py take/status` | ✓ |
 | Load testing (Locust + TTFT/RPS/p95) | `loadtest/` — 5 VU run: TPU 0% error @ TTFT p95 172ms | ✓ |
 | LLM observability (Langfuse/MLflow) | planned |
+| Containerized engine build (Docker + CUDA devel, nvcc on CPU, reproducible) | `engine-factory/` — offline `engine.tar.gz`, pinned `engine.sha`, zero Kaggle quota | ✓ |
 | LLM-as-judge evaluation | planned |
 | Paid Hopper serving (H200, BF16, 262k, serverless) | H200 tier — vLLM 0.28 + SleepMode snapshot + scale-to-zero, Modal | ✓ |
 
@@ -267,7 +290,7 @@ Secrets never enter this repository: tokens & runtime endpoint keys are kept in
 2. ~~Load testing~~ ✓ done (Locust, initial 5-VU baseline in `loadtest/`)
 3. Saturation ramp 20-50 VU + LangGraph persona corpus
 4. LLM observability (Langfuse/MLflow) + bf16-vs-Q4 eval
-5. Cache prebuilt llama-server binary to skip the 25-min in-kernel build (pull `/kaggle/working` → private dataset)
+5. ~~Cache prebuilt llama-server binary to skip the 25-min in-kernel build~~ ✓ done — `engine-factory/` builds the identical binary in Docker (no GPU), `bootstrap_cache` feeds it in; cold build phase → cache-hit
 6. H200 paid-tier throughput: raise `max_num_seqs`/batch for aggregate tok/s first; MTP4 on H200 as stretch (close the 14.8 → 126 tok/s single-stream gap); multi-H200 TP=2 for long-context scale
 
 `kaggle-tpu-lab/` is derived from [kaggle-tpu-lab](https://github.com/ARahim3/kaggle-tpu-lab) (MIT).
