@@ -212,7 +212,7 @@ folder in the Kaggle UI (Output tab → New Dataset).
   acceptance profile of 87/66/52 % per draft position). If the patch ever fails to
   apply (e.g. a future vllm-tpu version), the script disables MTP automatically rather
   than serve corrupted outputs. `--mtp 0` turns it off; k=4 fails to start.
-- **Harmless log noise.** vLLM prints a few scary-looking lines on every TPU start:
+- **Expected log noise.** vLLM prints a few warning lines on every TPU start:
   `Unable to poll the TPU GCE Metadata` (Kaggle isn't a GCE VM), `Failed to import
   from vllm._C` (that's the CUDA extension), `Triton ... 0 active driver(s)`, and
   `Transparent hugepages are not enabled`. None of them matter. The kernel log only

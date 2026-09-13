@@ -4,7 +4,7 @@
 Covers the `--no-watch` flow (push-only, controller path) and any after-the-fact
 need: reads tmp/<engine>-lab.json (kernel/topic/api_key), scans the ntfy topic
 for the latest endpoint, then atomically writes it into tmp/current_services.json
-so client machines can simply read that file.
+so client machines can read that file directly.
 
 Usage:
     ./Venv/bin/python app/register_service.py take tpu|gpu [--force]
