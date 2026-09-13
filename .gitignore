@@ -5,6 +5,8 @@ p3/reference/
 opencode.json
 session-*.md
 Untitled.ipynb
+Untitled1.ipynb
+test/
 .ipynb_checkpoints/
 __pycache__/
 *.pyc
