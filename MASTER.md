@@ -117,6 +117,7 @@ For multi-step tasks, state a brief plan:
 | 1 初始化 | `kl.login()` | 内存读Token→export KAGGLE_API_TOKEN/os.environ |
 | 2a 官方API | `api=kl.get_kaggle_api()` | 已认证KaggleApi实例,可调 kernels_list 等 |
 | 2b HTTP会话 | `s=kl.auth_session()` | requests Bearer会话,自定义REST调用 |
+| 2c 查余额 | `kl.quota()` | 返回 GPU/TPU 每周已用/剩余/总额小时 + 刷新时间(官方 SDK quota_view) |
 | 3 校验 | `print(kl.verify())` | 只显示掩码/长度/ok状态,不显Token原文 |
 
 ```python
