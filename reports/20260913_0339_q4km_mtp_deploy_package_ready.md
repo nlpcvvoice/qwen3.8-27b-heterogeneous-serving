@@ -13,7 +13,7 @@
 | setup.sh | 建 Venv+kaggle | 文案中性化 |
 | reference/README.md | 只读 token 说明 | 任意账号,去 touch 资源说明 |
 | kaggle_login.py | 认证(内存) | 去 tentenshishi 兜底,新增 `username()` |
-| kaggle-tpu-lab/kernel/serve_qwen38_gpu_mtp.py | 主内核 | ctx 98304+q8_0(已验证配置,P0 回退);`weights_dataset="_hf_direct"` 强制 HF;HF import 失败自动 pip |
+| kaggle-tpu-lab/kernel/serve_qwen38_gpu_mtp.py | 主内核 | ctx 98304+q8_0(已验证配置);`weights_dataset="_hf_direct"` 强制 HF;HF import 失败自动 pip |
 | p3/kernel/serve_qwen38_gpu_mtp.py | 镜像副本 | 与主内核 md5 相同 |
 | p3/kernel/ctrl_stop.py | 免费停机 | 不变 |
 | app/push_gpu_serve_mtp.py | 拉起 | USER=`kl.username()`;权重走 HF;自检自己 `llama-server-qwen38-cache` 是否存在 |
