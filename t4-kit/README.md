@@ -1,8 +1,9 @@
 # t4-kit — self-contained Kaggle T4 job package
 
-> Lets another agent in any other project directory authenticate to Kaggle, push a
-> Qwen3.8-27B inference job onto 2xT4, control it in real time and fetch results —
-> all from this folder alone. **GPU T4 only, no TPU logic.**
+> Standalone CLI kit to provision, serve and operate a Qwen3.8-27B inference job
+> on Kaggle 2xT4 from any checkout: authenticate, push the kernel, monitor in real
+> time, stop on demand and fetch results — all from this folder alone.
+> **GPU T4 only, no TPU logic.**
 >
 > Engine capability is identical to the main repo's GPU kernel: llama.cpp CUDA
 > source build / engine cache (skips the 25-min build) / OpenAI-compatible serving /
@@ -119,7 +120,7 @@ push ──▶ queued ──▶ 1 weights ──▶ 2 engine ──▶ 3 llama-s
 
 ---
 
-## 7. Engine cache: build once, reuse forever (the cost saver)
+## 7. Engine cache: build once, reuse across runs
 
 ```
 round 1 (no cache):  push ──▶ watch --stop-on built ──▶ engine-cached ──▶ auto CONTROL-stop
@@ -144,7 +145,7 @@ round 2+:            push(auto-attaches cache) ──▶ cache-hit, seconds to r
 | Item | Advice | Why |
 |---|---|---|
 | `--keepalive-min` | 120 (default) | service upper bound; kernel self-stops at expiry |
-| after cache hit | `watch --stop-on built` auto-stops | zero idle burn |
+| after cache hit | `watch --stop-on built` auto-stops | avoids idle time on the slot |
 | overage | kaggle queues automatically, no cost, just wait | 30 h/week reset visible via `check` |
 | donated credits | free; paid-credit machines only if chosen | kit is pinned to `NvidiaTeslaT4` (free tier) |
 

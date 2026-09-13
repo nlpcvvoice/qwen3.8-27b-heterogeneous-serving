@@ -12,10 +12,10 @@ Cache the `llama-server` binary so GPU kernels skip the ~25 min source build.
          └────→ binary from kernel output          │                                                ↓
                                                    │                                    /kaggle/input/.../llama-server
                                                    │                                     (skip 25-min build)
-                                          ┌─────────────────────┐
-                                          │  any machine / agent │
-                                          │  start.sh fetch      │
-                                          └─────────────────────┘
+┌─────────────────────┐
+                                           │  any machine         │
+                                           │  start.sh fetch      │
+                                           └─────────────────────┘
 ```
 
 ## One-command entrypoint (start.sh)

@@ -1,8 +1,13 @@
 # Qwen3.8-27B — Heterogeneous Serving (TPU v5e + GPU T4)
 
+*LLM inference serving with vLLM · llama.cpp · quantization · automatic failover · load testing · containerized build*
+
 Free high-end open-source LLM serving for agent/tool workloads: the same
 **Qwen3.8-27B** model exposed as an OpenAI-compatible API from **two** free
 accelerator backends, with automatic failover TPU → GPU.
+
+A controller/router picks a healthy backend and exposes one OpenAI-compatible
+endpoint + key that client machines read from a single state file.
 
 ```
                     clients (opencode, curl, agents...)
@@ -77,7 +82,7 @@ Ampere+(sm≥8.0), so the T4/P100 leg must run llama.cpp.
 | Observability | ntfy event bus + health checks on every startup phase; LLM observability (Langfuse/MLflow) planned |
 | Latency | TTFT/tok-s tracked per run; benchmark gates each deploy |
 | Accuracy drift | scheduled bf16 vs Q4 comparison + LLM-as-judge evals (planned) |
-| Availability | TPU→GPU failover controller — **live**: unhealthy→failover, TPU healthy→GPU auto-recycled |
+| Availability | TPU→GPU failover controller (local process, E2E-verified 2026-09-09): unhealthy→failover, TPU healthy→GPU auto-recycled |
 | Cost & quotas | separate TPU (~20h/wk) and GPU (~30h/wk) free quotas; keepalive-limited sessions. Paid tier (Modal H200): ~$4.54/h, `min_containers=0` + 600s scale-down + explicit stop → **$0 idle** (≈6.6 h/mo inside Modal's $30 free credit) |
 
 ## Measured results (2026-09-08)
@@ -100,7 +105,8 @@ Locust load test (5 VU, 70 s, mixed stream/sync, 15 realistic prompts — `loadt
 | End-to-end p50 / p95 | 0.57 / 1.9 s | 16.6 / 37.7 s |
 | Error rate | 0% | 0% |
 
-Both engines stress-tested with zero failures; TPU ≈ 11-29x faster at low concurrency. Saturation ramp (20-50 VU) is next.
+Both engines held 0% errors under the measured 5-VU load; TPU ≈ 11-29x faster at
+this concurrency level. Saturation ramp (20-50 VU) is next.
 
 ### Failover & service registration (verified 2026-09-09)
 
@@ -116,7 +122,7 @@ Both engines stress-tested with zero failures; TPU ≈ 11-29x faster at low conc
 |---|---|---|
 | push → kernel RUNNING | ~3 min | Kaggle queue + T4 slot provisioning |
 | weights mount (private dataset) | <10 s | 16.46 GB already on Kaggle storage |
-| llama.cpp source build (cmake, CUDA) | 25 min | i.e. 1511 s — this is the long pole |
+| llama.cpp source build (cmake, CUDA) | 25 min | i.e. 1511 s — the dominant phase |
 | llama-server load + warmup | 2 min | model 15.3 GiB offload to 2xT4 VRAM |
 | READY | — | 18:42:59, engine-built 18:40:52 |
 
@@ -126,12 +132,12 @@ which is why the controller pre-warms the GPU only when needed.
 
 ### Engine factory — containerized offline build (no GPU)
 
-The 25-min "build in the exam room" step can be moved to a **factory**: a
-Docker image (`nvidia/cuda:12.4.0-devel`, nvcc on CPU only) that produces the
-*identical* `engine.tar.gz` (`bin/` + `lib/`, same cmake flags as the in-kernel
-source build) → upload to the private dataset → the same `bootstrap_cache.py`
-and `unpack_engine()` pipeline feeds it in, so kernels boot with
-`engine-cache-hit` (≈instant) even on the first run.
+The ~25 min in-kernel cmake build can be moved off Kaggle: a Docker image
+(`nvidia/cuda:12.4.0-devel`, nvcc on CPU only) produces the *identical*
+`engine.tar.gz` (`bin/` + `lib/`, same cmake flags as the in-kernel source
+build). It is uploaded to the private dataset and flows through the existing
+`bootstrap_cache.py` / `unpack_engine()` pipeline, so kernels boot with
+`engine-cache-hit` (≈instant) even on a first run.
 
 | | In-kernel source build | engine-factory (Docker) |
 |---|---|---|
@@ -142,14 +148,16 @@ and `unpack_engine()` pipeline feeds it in, so kernels boot with
 | Reproducible | depends on build-day deps | same image + commit → identical artifact |
 
 Usage: `kaggle-tpu-lab/engine-factory/build_engine.sh [OUT] [--commit <sha|master>]`
-(details in `engine-factory/README.md`). Print an `engine.sha` for versioning;
-runtime smoke-test on T4 is the only remaining in-kernel check.
+(details in `engine-factory/README.md`). Records an `engine.sha` for version
+pinning; a T4 runtime smoke-test is the only remaining in-kernel check.
 
 ## Three-accelerator benchmark (2026-09-11)
 
 Same Qwen3.8-27B model served through three accelerators — one free TPU class,
 one free GPU class, one paid single-card Hopper tier. All figures from live
 endpoints in this repository; no external benchmarks imported.
+
+Client-visible topology for the three-leg setup:
 
 ```
                     clients (opencode, curl, agents...)
@@ -197,8 +205,8 @@ mature. Read single-stream as "stock-vLLM baseline", not "card ceiling".
 throughput: it is the only leg here that serves the full 262,144 window on a single card
 and sustains >4,000 tok/s prefill at ≥100k prompts (the TPU leg sits at ~1.6k and the T4
 leg cannot fit >98k at all). Under the measured loads H200's aggregate decode is only
-~1.2× the T4 leg (5 × 457 tok in 36 s ≈ 63 tok/s vs ~54 tok/s on 4 slots) — honest
-number: at this output size the card's headroom needs more tokens per batch to show.
+~1.2× the T4 leg (5 × 457 tok in 36 s ≈ 63 tok/s vs ~54 tok/s on 4 slots): at this
+output size the card's headroom needs more tokens per batch to show.
 RPS must never be compared across output lengths here: TPU's 2.36 is a short-output
 batch pool, H200's 0.14 is 512-token streams at 100% success.
 
@@ -270,19 +278,19 @@ Secrets never enter this repository: tokens & runtime endpoint keys are kept in
 
 ## Skills Used
 
-| Skill | Where |
-|---|---|
-| LLM serving (vLLM, llama.cpp, OpenAI-compat) | TPU + GPU kernels |
-| Model optimization (GGUF Q4_K_M, offload, batching) | GPU engine |
-| Heterogeneous accelerator scheduling (TPU/GPU via API, machine_shape) | push/probe scripts |
-| Tool-call parsing & eval (qwen3_coder style) | TPU eval chain |
-| Failover / health checking | controller — live on TPU+GPU (unhealthy→failover, healthy→recycle) | ✓ |
-| Service endpoint registration | `tmp/current_services.json` + `register_service.py take/status` | ✓ |
-| Load testing (Locust + TTFT/RPS/p95) | `loadtest/` — 5 VU run: TPU 0% error @ TTFT p95 172ms | ✓ |
-| LLM observability (Langfuse/MLflow) | planned |
-| Containerized engine build (Docker + CUDA devel, nvcc on CPU, reproducible) | `engine-factory/` — offline `engine.tar.gz`, pinned `engine.sha`, zero Kaggle quota | ✓ |
-| LLM-as-judge evaluation | planned |
-| Paid Hopper serving (H200, BF16, 262k, serverless) | H200 tier — vLLM 0.28 + SleepMode snapshot + scale-to-zero, Modal | ✓ |
+| Skill | Where | Status |
+|---|---|---|
+| LLM serving (vLLM, llama.cpp, OpenAI-compat) | TPU + GPU kernels | delivered |
+| Model optimization (GGUF Q4_K_M, offload, batching) | GPU engine | delivered |
+| Heterogeneous accelerator scheduling (TPU/GPU via API, machine_shape) | push/probe scripts | delivered |
+| Tool-call parsing & eval (qwen3_coder style) | TPU eval chain | delivered |
+| Failover / health checking | controller — TPU+GPU (unhealthy→failover, healthy→recycle) | delivered |
+| Service endpoint registration | `tmp/current_services.json` + `register_service.py take/status` | delivered |
+| Load testing (Locust + TTFT/RPS/p95) | `loadtest/` — 5 VU run: TPU 0% error @ TTFT p95 172ms | delivered |
+| Containerized engine build (Docker + CUDA devel, nvcc on CPU, reproducible) | `engine-factory/` — offline `engine.tar.gz`, pinned `engine.sha` | delivered |
+| Paid Hopper serving (H200, BF16, 262k, serverless) | H200 tier — vLLM 0.28 + SleepMode snapshot + scale-to-zero, Modal | delivered |
+| LLM observability (Langfuse/MLflow) | trace / cost-per-token / eval dashboards | planned |
+| LLM-as-judge evaluation | bf16 vs Q4 comparison suite | planned |
 
 ## Roadmap
 
