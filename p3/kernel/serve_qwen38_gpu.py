@@ -22,7 +22,7 @@ DEFAULTS = {
     "hf_file": "Qwen3.8-27B-UD-Q4_K_M.gguf",
     "served_model_name": "qwen3.8-27b",
     "ctx_size": 98304,             # max with q8_0 KV on 2xT4 (~12.5 GiB cache, all weights on GPU)
-    "n_parallel": 4,               # llama-server slots = concurrent requests (per-slot ctx = ctx/n_parallel)
+    "n_parallel": 1,               # single stream: one slot gets the full 96K, not 96K/4
     "n_gpu_layers": 999,           # offload everything to the (two) T4s
     "n_batch": 1024,
     "n_threads": 8,
