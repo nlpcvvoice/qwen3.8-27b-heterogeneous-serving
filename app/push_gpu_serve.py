@@ -28,7 +28,7 @@ def main() -> None:
         "ntfy_topic": "ktl-" + uuid.uuid4().hex[:20],
         "api_key": "sk-" + secrets.token_hex(16),
         "weights_dataset": "YOUR_KAGGLE_USER/qwen3-8-27b-q4-k-m-private",
-        "keepalive_min": 1800,  # GPU: 30 h (常驻兜底;配额内按需)
+        "keepalive_min": 1800,  # GPU: 30 h (resident fallback, on-demand within quota)
     }
     dataset_sources = [cfg["weights_dataset"]]
     if _dataset_exists(CACHE_DATASET):

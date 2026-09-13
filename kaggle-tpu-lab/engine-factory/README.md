@@ -1,59 +1,64 @@
-# engine-factory — 离线预编译 llama-server(容器化,不需要 GPU)
+# engine-factory — offline containerized llama-server build (no GPU)
 
-把 Kaggle 内核里最耗时的一步(在考场内现攒 llama-server,~25 min)搬到**工厂**:
-用 Docker + CUDA devel 镜像,在任意有 CPU 的机器上编译出与内核源码构建**完全相同**的
-`engine.tar.gz`(`bin/` + `lib/` 布局),再交给现有的 `bootstrap_cache.py` 喂进内核。
+Pre-builds the GPU engine (`llama-server`, CUDA sm_75) outside Kaggle, so kernels
+boot with `engine-cache-hit` instead of a ~25 min in-kernel cmake build.
 
-- 编译只用 CPU(nvcc 生成 sm_75 目标码,不需要显卡);
-- 同一镜像 + 零参数改动 → 每台"车"可复现(记录 `engine.sha`);
-- 内核启动即 `engine-cache-hit`,不再发生冷构建。
+- Compilation is CPU-only (nvcc emits sm_75 target code; no GPU required).
+- Same base image + same flags → reproducible artifact, pinned by `engine.sha`.
+- Artifact ships through the existing `bootstrap_cache.py` / `unpack_engine()`
+  pipeline unchanged.
 
-## 用法
+## Usage
 
 ```bash
-# 默认:master(与内核源码构建同源),输出到 ./out
+# Default: master branch (same source as the in-kernel build), output to ./out
 ./build_engine.sh
 
-# 指定输出目录 / 固定版本
-./build_engine.sh /tmp/engout --commit <sha-or-master>
+# Custom output dir / pinned version
+./build_engine.sh /path/to/out --commit <sha-or-master>
 
-# 产物(./out)
-#   engine.tar.gz   内核要求的 tar 布局(bin/ + lib/),由 package.sh 用 readelf 校验动态库
-#   engine.sha      本次编译所锁定的 llama.cpp commit
+# Artifacts (in OUT)
+#   engine.tar.gz   kernel-required layout (bin/ + lib/), validated by package.sh
+#   engine.sha      resolved llama.cpp commit for versioning
 ```
 
-> 首次构建镜像会拉取 `nvidia/cuda:12.4.0-devel-ubuntu22.04`(~5 GB)+ 卷代码 + 编译,约 20-40 min;
-> 再次构建走 Docker 缓存,秒级出包。
+> First run pulls `nvidia/cuda:12.4.0-devel-ubuntu22.04` (~5 GB) and compiles
+> (~20-40 min on 4 vCPU). Subsequent runs hit Docker build cache and package in seconds.
 
-## 与内核的对应关系
+## Correspondence to the kernel source build
 
-| 项 | 内核原版(serve_qwen38_gpu_mtp.py §2) | 本工厂 |
+| Item | In-kernel (serve_qwen38_gpu_mtp.py §2) | Factory |
 |---|---|---|
-| 源码 | git clone ggml-org/llama.cpp master | 同一仓库(master,可锁定 commit) |
-| 标志位 | GGML_CUDA=ON / FORCE_DMMV / CCACHE=OFF / Release / ARCH sm_75 / NATIVE=OFF | **一字不差** |
-| 产物 | WORK/engine.tar.gz(bin+lib) / 单文件 llama-server | /out/engine.tar.gz + engine.sha |
-| 消耗的资源 | Kaggle GPU 会话(~25 min,GPU 空转) | 本地 CPU + Docker(零 Kaggle 资源) |
+| Source | git clone ggml-org/llama.cpp master | same repo (master, pinnable via `--commit`) |
+| Flags | GGML_CUDA=ON / FORCE_DMMV / CCACHE=OFF / Release / arch sm_75 / NATIVE=OFF | identical |
+| Output | `WORK/engine.tar.gz` (bin+lib) | `/out/engine.tar.gz` + `engine.sha` |
+| Cost | Kaggle GPU-session time, card idle | local CPU + Docker, zero Kaggle quota |
 
-## 怎么喂给内核(复用现有管线)
+`-DBUILD_SHARED_LIBS=OFF` is required: with shared ggml the CUDA-driver dependency
+lives inside `libggml-cuda.so` and the `llama-server` link gets no `libcuda`,
+causing undefined `cu*` references. Static ggml resolves them at the final link.
+
+## Feeding the kernel (reuses the existing pipeline)
 
 ```
-工厂 → out/engine.tar.gz → 上传到私有 dataset(如 llama-server-qwen38-cache)
-     → push_gpu_serve_mtp.py 自检该 dataset → 自动 attach
-     → 内核 find_input → unpack_engine() → 引擎即开即用
+factory → OUT/engine.tar.gz → upload to private dataset (e.g. llama-server-qwen38-cache)
+       → push script auto-attaches it → kernel find_input → unpack_engine() → ready
 ```
 
-## 校验清单
+## Validation checklist
 
-| 检查 | 方法 |
+| Check | Method |
 |---|---|
-| tar 布局正确 | `tar tzf out/engine.tar.gz` 含 `bin/llama-server` 与 `lib/` |
-| 目标架构 sm_75 | `cuobjdump`/`nvdisasm` 或构建期日志确认 `arch=compute_75` |
-| 动态库依赖正常 | package.sh 内 readelf 检查 NEEDED(libcuda/libcudart/libcublas/libllama) |
-| 版本可复现 | `out/engine.sha` 记录 commit;换版本再跑一次 |
-| 真实启动 | 待 GPU 放行后跑一次内核,观察 `engine-cache-hit`(运行时核验项) |
+| tar layout | `tar tzf engine.tar.gz` contains `bin/llama-server` (and `lib/` when present) |
+| target arch sm_75 | build logs confirm `arch=compute_75`; binary links CUDA runtime libs |
+| dynamic libs | package.sh readelf check: NEEDED libcublas.so.12 / libcuda.so.1 (present on Kaggle runtime) |
+| reproducibility | `engine.sha` records the commit; rebuild with same args → same artifact |
+| live boot | one kernel run, watch `engine-cache-hit` (runtime check, requires GPU grant) |
 
-## 注意
+## Notes
 
-- 运行时 CUDA 驱动由 Kaggle 主机提供,本机不装/不下载即可;
-  工厂镜像与 Kaggle 运行时同为 Ubuntu 22.04 + CUDA 12.x,ABI 对齐。
-- 产物只放 `out/`,不入 git;本目录仅提交构建脚本与文档。
+- The CUDA driver is provided by the Kaggle host at runtime; the container only
+  links against the driver stub at build time.
+- The base image (Ubuntu 22.04 + CUDA 12.x) matches the Kaggle kernel runtime
+  image for ABI compatibility.
+- Artifacts stay in `OUT/` (gitignored); only the build scripts and this doc are committed.

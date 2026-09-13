@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""考试卷 — assertion bank + tool-call parser checks against live endpoints.
+"""Evaluation suite: assertion bank + tool-call parser checks against live endpoints.
 
 Zero-quota by design: hitting an already-running kernel only uses serving
 capacity, never launches new kernels. Use --dry (default) to self-test the
