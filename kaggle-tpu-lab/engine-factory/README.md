@@ -1,64 +1,82 @@
-# engine-factory — offline containerized llama-server build (no GPU)
+# engine-factory — offline containerized build of the GPU inference engine
 
-Pre-builds the GPU engine (`llama-server`, CUDA sm_75) outside Kaggle, so kernels
-boot with `engine-cache-hit` instead of a ~25 min in-kernel cmake build.
+Appendix to the heterogeneous-serving stack. Produces the CUDA `llama-server`
+engine used by the T4 GPU kernel (`kaggle-tpu-lab/kernel/serve_qwen38_gpu_mtp.py`)
+outside of Kaggle, eliminating the ~25 min in-kernel cmake build on cold kernels.
 
-- Compilation is CPU-only (nvcc emits sm_75 target code; no GPU required).
-- Same base image + same flags → reproducible artifact, pinned by `engine.sha`.
-- Artifact ships through the existing `bootstrap_cache.py` / `unpack_engine()`
-  pipeline unchanged.
+## Rationale
 
-## Usage
+- **No GPU required** — nvcc emits `sm_75` target code; compilation is CPU-bound.
+- **Reproducible** — same base image + identical cmake flags + a pinned
+  `llama.cpp` commit (`engine.sha`) yield a byte-stable artifact.
+- **Zero Kaggle cost** — the build consumes only local (Docker) cycles, so no
+  GPU-session time or quota is burnt compiling with the accelerator idle.
+- **Drop-in** — the artifact is consumed through the existing
+  `bootstrap_cache.py` / `unpack_engine()` pipeline; no kernel changes required.
+
+## Build invocation
 
 ```bash
-# Default: master branch (same source as the in-kernel build), output to ./out
+# Default: llama.cpp master (same source lineage as the in-kernel build)
 ./build_engine.sh
 
-# Custom output dir / pinned version
+# Custom output directory / pinned revision
 ./build_engine.sh /path/to/out --commit <sha-or-master>
-
-# Artifacts (in OUT)
-#   engine.tar.gz   kernel-required layout (bin/ + lib/), validated by package.sh
-#   engine.sha      resolved llama.cpp commit for versioning
 ```
 
-> First run pulls `nvidia/cuda:12.4.0-devel-ubuntu22.04` (~5 GB) and compiles
-> (~20-40 min on 4 vCPU). Subsequent runs hit Docker build cache and package in seconds.
+### Artifacts (written to `OUT`)
 
-## Correspondence to the kernel source build
+| File | Content |
+|---|---|
+| `engine.tar.gz` | kernel-required layout (`bin/`, plus `lib/` when present); validated by `package.sh` |
+| `engine.sha` | resolved `llama.cpp` commit for version pinning |
 
-| Item | In-kernel (serve_qwen38_gpu_mtp.py §2) | Factory |
+> First build pulls `nvidia/cuda:12.4.0-devel-ubuntu22.04` (~5 GB) and compiles in
+> ~20-40 min on 4 vCPU. Later builds reuse Docker layer caches and package in seconds.
+
+## Reproducing the in-kernel build
+
+| Parameter | In-kernel (`serve_qwen38_gpu_mtp.py` §2) | engine-factory |
 |---|---|---|
-| Source | git clone ggml-org/llama.cpp master | same repo (master, pinnable via `--commit`) |
-| Flags | GGML_CUDA=ON / FORCE_DMMV / CCACHE=OFF / Release / arch sm_75 / NATIVE=OFF | identical |
-| Output | `WORK/engine.tar.gz` (bin+lib) | `/out/engine.tar.gz` + `engine.sha` |
-| Cost | Kaggle GPU-session time, card idle | local CPU + Docker, zero Kaggle quota |
+| Source | git clone `ggml-org/llama.cpp` (master) | same, pinnable via `--commit` |
+| Flags | `GGML_CUDA=ON` · `FORCE_DMMV` · `CCACHE=OFF` · Release · arch `sm_75` · `LLAMA_NATIVE=OFF` | identical |
+| Output | `WORK/engine.tar.gz` (`bin/`+`lib/`) | `OUT/engine.tar.gz` + `engine.sha` |
+| Runtime cost | GPU-session minutes, card idle | none |
 
-`-DBUILD_SHARED_LIBS=OFF` is required: with shared ggml the CUDA-driver dependency
-lives inside `libggml-cuda.so` and the `llama-server` link gets no `libcuda`,
-causing undefined `cu*` references. Static ggml resolves them at the final link.
+### Required build-time note
 
-## Feeding the kernel (reuses the existing pipeline)
+`-DBUILD_SHARED_LIBS=OFF` is mandatory. With shared ggml the CUDA-driver
+dependency is embedded in `libggml-cuda.so`, so the `llama-server` link step
+does not resolve the `cu*` driver entry points and fails with undefined-symbol
+errors. Statically linking ggml resolves the driver at the final link.
+
+## Integration with the kernels
 
 ```
-factory → OUT/engine.tar.gz → upload to private dataset (e.g. llama-server-qwen38-cache)
-       → push script auto-attaches it → kernel find_input → unpack_engine() → ready
+OUT/engine.tar.gz
+   → upload to the private cache dataset (e.g. llama-server-qwen38-cache)
+   → push script auto-attaches the dataset
+   → kernel: find_input → unpack_engine() → engine-cache-hit, ready in seconds
 ```
 
-## Validation checklist
+The unpacked engine must be uploaded via the same `cache-upload` flow already
+used for in-kernel builds; nothing else in the runtime path changes.
+
+## Validation
 
 | Check | Method |
 |---|---|
-| tar layout | `tar tzf engine.tar.gz` contains `bin/llama-server` (and `lib/` when present) |
-| target arch sm_75 | build logs confirm `arch=compute_75`; binary links CUDA runtime libs |
-| dynamic libs | package.sh readelf check: NEEDED libcublas.so.12 / libcuda.so.1 (present on Kaggle runtime) |
-| reproducibility | `engine.sha` records the commit; rebuild with same args → same artifact |
-| live boot | one kernel run, watch `engine-cache-hit` (runtime check, requires GPU grant) |
+| Archive layout | `tar tzf engine.tar.gz` contains `bin/llama-server` |
+| Target architecture | build log shows `arch=compute_75`; binary links CUDA runtimes |
+| Dynamic dependencies | `package.sh` runs `readelf`: NEEDED `libcublas.so.12`, `libcuda.so.1` (present on the Kaggle runtime image) |
+| Reproducibility | `engine.sha` pins the commit; repeat build with same args → identical artifact |
+| Live boot | one kernel run; confirm `engine-cache-hit` (needs a GPU-enabled session) |
 
-## Notes
+## Operational notes
 
-- The CUDA driver is provided by the Kaggle host at runtime; the container only
-  links against the driver stub at build time.
-- The base image (Ubuntu 22.04 + CUDA 12.x) matches the Kaggle kernel runtime
-  image for ABI compatibility.
-- Artifacts stay in `OUT/` (gitignored); only the build scripts and this doc are committed.
+- The container links against the CUDA **driver stub** at build time; the real
+  driver is supplied by the Kaggle host at runtime.
+- The base image (Ubuntu 22.04 + CUDA 12.x) is ABI-matched to the Kaggle kernel
+  runtime image.
+- Artifacts stay under `OUT/` (gitignored); only the build scripts, Dockerfile
+  and this document are committed.
