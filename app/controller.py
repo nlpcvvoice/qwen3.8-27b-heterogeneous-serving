@@ -190,7 +190,7 @@ def stop(key):
 
 
 def _sim():
-    """Dev workaround: pretend an engine is down without touching the real one."""
+    """Dev workaround: simulate an engine is down without touching the real one."""
     try:
         return json.loads(SIM_FILE.read_text())
     except Exception:

@@ -249,7 +249,7 @@ skills exercised here transfer directly:
 | Locust self-run load tests | CI load pipeline, capacity & chaos testing | k6, Guidellm, LLMPerf, Inference Perf, Gremlin |
 | LLM-as-judge + tool-call assertions | eval gates in CI/CD, drift & bias monitoring | DeepEval/promptfoo, Evidently, WhyLabs |
 
-Skill transfer (applies to production work):
+Transferable skills:
 
 | Skill built here | Enterprise application | Evidence in repo |
 |---|---|---|
