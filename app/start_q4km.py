@@ -93,7 +93,6 @@ def write_config(endpoint: str, api_key: str) -> Path:
             },
         },
         "model": "kaggle/qwen3.8-27b",
-        "instructions": ["./MASTER.md"],
     }
     OUT_JSON.write_text(json.dumps(cfg, indent=2) + "\n")
     return OUT_JSON

@@ -3,7 +3,7 @@
 
 Sets KAGGLE_API_TOKEN / KAGGLE_USERNAME / KAGGLE_CONFIG_DIR in the child env,
 then runs `python launch.py <args...>` from the repo directory. Never prints the
-token (see MASTER.md: in-memory only).
+token (in-memory only).
 """
 import os
 import subprocess

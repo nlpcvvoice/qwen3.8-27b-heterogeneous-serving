@@ -10,7 +10,7 @@ Usage:
     api = kl.get_kaggle_api() # official kaggle.api authenticated instance
     print(kl.verify())        # masked sanity check
 
-Horizontal constraints (see MASTER.md):
+Horizontal constraints:
     - token source : ./reference/API-Token            (read-only, memory only)
     - config dir   : ./tmp/kaggle_cfg                 (keeps writes inside project)
     - no writes to ~/.kaggle / ~/.kaggle/access_token
