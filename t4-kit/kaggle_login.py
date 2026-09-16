@@ -119,7 +119,7 @@ def get_kaggle_api():
         try:
             tok = os.environ[KAGGLE_API_TOKEN_ENV]
             api.config_values["token"] = tok
-            api.config_values["username"] = api.config_values.get("username", "YOUR_KAGGLE_USER")
+            api.config_values["username"] = api.config_values.get("username") or os.environ.get("KAGGLE_USERNAME") or "kaggle-user"
             api.config_values["auth_method"] = "access_token"
         except Exception:  # noqa: BLE001
             pass

@@ -11,8 +11,8 @@ import kaggle_login as kl
 ROOT = Path(__file__).resolve().parent.parent
 KERNEL_SRC = ROOT / "kaggle-tpu-lab" / "kernel" / "serve_qwen38_gpu.py"
 STATE_FILE = ROOT / "tmp" / "kaggle-gpu-lab.json"
-USER = "YOUR_KAGGLE_USER"
-CACHE_DATASET = "YOUR_KAGGLE_USER/llama-server-qwen38-cache"
+USER = kl._read_username()
+CACHE_DATASET = f"{USER}/llama-server-qwen38-cache"
 
 
 def _dataset_exists(ref: str) -> bool:
@@ -27,7 +27,7 @@ def main() -> None:
     cfg = {
         "ntfy_topic": "ktl-" + uuid.uuid4().hex[:20],
         "api_key": "sk-" + secrets.token_hex(16),
-        "weights_dataset": "YOUR_KAGGLE_USER/qwen3-8-27b-q4-k-m-private",
+        "weights_dataset": f"{USER}/qwen3-8-27b-q4-k-m-private",
         "keepalive_min": 1800,  # GPU: 30 h (resident fallback, on-demand within quota)
     }
     dataset_sources = [cfg["weights_dataset"]]

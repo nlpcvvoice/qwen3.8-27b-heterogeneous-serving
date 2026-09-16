@@ -130,7 +130,7 @@ def get_kaggle_api() -> "object":
         try:
             tok = os.environ[KAGGLE_API_TOKEN_ENV]
             api.config_values["token"] = tok
-            api.config_values["username"] = api.config_values.get("username", "YOUR_KAGGLE_USER")
+            api.config_values["username"] = api.config_values.get("username") or os.environ.get("KAGGLE_USERNAME") or "kaggle-user"
             api.config_values["auth_method"] = "access_token"
         except Exception:  # noqa: BLE001
             pass
@@ -410,11 +410,11 @@ def _find_control_topic(kernel_ref: str) -> str | None:
 
 
 def _read_username() -> str:
-    """Return the Kaggle username for kernel metadata IDs."""
+    """Return the Kaggle username for kernel metadata IDs (resolved, never hardcoded)."""
     try:
-        return get_kaggle_api().config_values.get("username", "YOUR_KAGGLE_USER")
+        return get_kaggle_api().config_values.get("username") or os.environ.get("KAGGLE_USERNAME") or "kaggle-user"
     except Exception:
-        return "YOUR_KAGGLE_USER"
+        return os.environ.get("KAGGLE_USERNAME") or "kaggle-user"
 
 
 if __name__ == "__main__":

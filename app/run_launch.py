@@ -20,7 +20,7 @@ REPO = ROOT / "kaggle-tpu-lab"
 def main() -> None:
     kl.login()  # reads token in memory + exports KAGGLE_API_TOKEN / KAGGLE_CONFIG_DIR
 
-    os.environ["KAGGLE_USERNAME"] = "YOUR_KAGGLE_USER"  # avoids CLI username detection path
+    os.environ["KAGGLE_USERNAME"] = kl._read_username()  # avoids CLI username detection path
 
     cmd = [sys.executable, "launch.py", *sys.argv[1:]]
     print("running:", " ".join(cmd))

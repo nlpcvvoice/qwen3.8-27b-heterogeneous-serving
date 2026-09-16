@@ -1,7 +1,20 @@
 import os, json, sys, glob, traceback
 from kaggle.api.kaggle_api_extended import KaggleApi
 
-USER = "YOUR_KAGGLE_USER"
+def _kaggle_user() -> str:
+    for p in (os.environ.get("KAGGLE_CONFIG_DIR", "") + "/kaggle.json",
+              os.path.expanduser("~/.kaggle/kaggle.json")):
+        try:
+            return json.load(open(p))["username"]
+        except Exception:
+            pass
+    u = os.environ.get("KAGGLE_USERNAME")
+    if u:
+        return u
+    from kaggle.api.kaggle_api_extended import KaggleApi
+    return KaggleApi().config_values["username"]
+
+USER = _kaggle_user()
 SLUG = "qwen3-8-27b-bf16-private"
 RELEASE = "/kaggle/working/release"
 LOG = "/kaggle/working/build.log"
@@ -74,7 +87,7 @@ try:
     try:
         resp = api.dataset_create_new(RELEASE, public=False, quiet=True, convert_to_csv=False)
         log("dataset_create_new returned: " + json.dumps(resp.to_dict() if hasattr(resp, 'to_dict') else str(resp)))
-        write_done("created id=YOUR_KAGGLE_USER/" + SLUG)
+        write_done("created id=" + USER + "/" + SLUG)
         log("SUCCESS (dataset create request accepted)")
     except Exception as e:
         log("dataset_create_new error: " + repr(e))
@@ -85,7 +98,7 @@ try:
                                                convert_to_csv=False)
             log("dataset_create_version returned: " +
                 json.dumps(resp2.to_dict() if hasattr(resp2, 'to_dict') else str(resp2)))
-            write_done("updated id=YOUR_KAGGLE_USER/" + SLUG)
+            write_done("updated id=" + USER + "/" + SLUG)
             log("SUCCESS (dataset updated)")
         except Exception as e2:
             write_err("create failed: " + repr(e) + "\nversion failed: " + repr(e2))

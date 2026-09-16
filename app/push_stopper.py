@@ -10,7 +10,7 @@ import kaggle_login as kl
 
 ROOT = Path(__file__).resolve().parent.parent
 SRC = ROOT / "p3" / "kernel" / "ctrl_stop.py"
-USER = "YOUR_KAGGLE_USER"
+USER = kl._read_username()
 SLUG = "qwen38-gpu-ctrl"
 
 

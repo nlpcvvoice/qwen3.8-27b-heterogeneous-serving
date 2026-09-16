@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Shared P3 engine-cache helpers. No secrets here; auth lives in kaggle_login.py."""
 import hashlib
+import json
 import os
 import re
 import shutil
@@ -8,7 +9,20 @@ import tempfile
 from pathlib import Path
 
 P3_ROOT = Path(__file__).resolve().parent
-CACHE_DATASET = "YOUR_KAGGLE_USER/llama-server-qwen38-cache"
+def _kaggle_user() -> str:
+    for p in (os.environ.get("KAGGLE_CONFIG_DIR", "") + "/kaggle.json",
+              os.path.expanduser("~/.kaggle/kaggle.json")):
+        try:
+            return json.load(open(p))["username"]
+        except Exception:
+            pass
+    u = os.environ.get("KAGGLE_USERNAME")
+    if u:
+        return u
+    from kaggle.api.kaggle_api_extended import KaggleApi
+    return KaggleApi().config_values["username"]
+
+CACHE_DATASET = _kaggle_user() + "/llama-server-qwen38-cache"
 CACHE_SLUG = CACHE_DATASET.split("/")[-1]
 SKIP_COMPILE_HOOK = re.compile(r"# --- 2a\. cache dataset hit")
 ELSE_BUILD_HOOK = re.compile(r"elif have_toolchain:")

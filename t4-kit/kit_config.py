@@ -1,5 +1,6 @@
 """t4-kit shared constants (T4 / GPU only — no TPU)."""
 
+import json
 import os
 from pathlib import Path
 
@@ -7,7 +8,20 @@ KIT = Path(__file__).resolve().parent
 PARENT_DIR = KIT.parent  # project root that carries the kit (deploy target)
 
 # ---- the Kaggle account (single-user kit) -------------------------------
-T4_OWNER = "YOUR_KAGGLE_USER"
+def _kaggle_user() -> str:
+    for p in (os.environ.get("KAGGLE_CONFIG_DIR", "") + "/kaggle.json",
+              os.path.expanduser("~/.kaggle/kaggle.json")):
+        try:
+            return json.load(open(p))["username"]
+        except Exception:
+            pass
+    u = os.environ.get("KAGGLE_USERNAME")
+    if u:
+        return u
+    from kaggle.api.kaggle_api_extended import KaggleApi
+    return KaggleApi().config_values["username"]
+
+T4_OWNER = _kaggle_user()
 KERNEL_ID = f"{T4_OWNER}/qwen38-t4-serve"
 KERNEL_SLUG = "qwen38-t4-serve"
 WEIGHTS_DATASET = f"{T4_OWNER}/qwen3-8-27b-q4-k-m-private"  # 16.46 GB GGUF mirror

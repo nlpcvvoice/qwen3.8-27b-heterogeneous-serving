@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""台词本 — offline persona prompt corpus generator (zero dependency, no quota).
+"""Persona prompt corpus generator (offline, zero dependency, no quota).
 
 Generates a realistic distribution of user prompts across personas + intents,
 meant to feed Locust load tests (PERSONAS_CORPUS) or the eval suite.
@@ -8,9 +8,9 @@ Output: tmp/personas/corpus.jsonl
   rows: {"persona","role","intent","prompt","domain","difficulty","max_tokens_hint"}
 
 Usage:
-  Vev/bin/python app/personas.py                     # default: 200 prompts
-  Vev/bin/python app/personas.py --count 500 --seed 7 --out tmp/personas/corpus.jsonl
-  ./Venv/bin/python app/personas.py --list           # show personas only
+  Venv/bin/python app/personas.py                     # default: 200 prompts
+  Venv/bin/python app/personas.py --count 500 --seed 7 --out tmp/personas/corpus.jsonl
+  ./Venv/bin/python app/personas.py --list            # show personas only
 """
 import argparse
 import json
@@ -24,206 +24,206 @@ DEFAULT_OUT = ROOT / "tmp" / "personas" / "corpus.jsonl"
 PERSONAS = [
     {
         "persona": "chemistry_teacher",
-        "role": "高中化学老师正在备课",
+        "role": "High-school chemistry teacher prepping a lesson",
         "domain": "chemistry",
         "difficulty": 1,
         "intents": {
             "explain": [
-                "帮我解释一下什么是化学平衡,举例说明",
-                "用最直白的话讲清楚氧化还原反应的原理",
-                "怎么给学生讲'电子转移'这个概念才不晕?",
-                "设计一个3分钟的课堂演示来解释催化剂的作用",
+                "Explain chemical equilibrium to me, with examples.",
+                "Explain oxidation-reduction reactions in the plainest words possible.",
+                "How do I teach the concept of 'electron transfer' without confusing students?",
+                "Design a 3-minute classroom demo that shows what a catalyst does.",
             ],
             "prepare": [
-                "帮我出一套高一化学期中模拟题,10道选择题",
-                "写一个酸碱中和反应的教学板书提纲",
-                "整理本周要讲的知识点成一份备课清单",
+                "Write a 10-multiple-choice midterm mock exam for 10th-grade chemistry.",
+                "Outline a blackboard plan for a lesson on acid-base neutralization.",
+                "Turn this week's topics into a lesson-prep checklist.",
             ],
         },
     },
     {
         "persona": "developer",
-        "role": "后端开发在排查问题",
+        "role": "Backend engineer debugging an issue",
         "domain": "software",
         "difficulty": 2,
         "intents": {
             "debug": [
-                "这段 Python 代码哪里错了?\n{code}",
-                "为什么我的 Redis 连接池会耗尽?给排查思路",
-                "写一个快速定位内存泄漏的 Python 脚本",
+                "What's wrong with this Python code?\n{code}",
+                "Why is my Redis connection pool getting exhausted? Give me a debugging plan.",
+                "Write a quick Python script to locate a memory leak.",
             ],
             "design": [
-                "设计一个高并发下的限流方案,对比令牌桶和漏桶",
-                "给一个 1000 QPS 的 API 网关画架构选型建议",
-                "Postgres 索引失效的常见原因有哪些?如何预防",
+                "Design a rate-limiting scheme for high concurrency; compare token bucket vs leaky bucket.",
+                "Give architecture recommendations for an API gateway handling 1000 QPS.",
+                "What are the common causes of Postgres index inefficiency, and how to prevent them?",
             ],
         },
     },
     {
         "persona": "student",
-        "role": "六年级小学生问自然课问题",
+        "role": "Sixth-grader asking science-class questions",
         "domain": "general-knowledge",
         "difficulty": 0,
         "intents": {
             "why": [
-                "鲸鱼为什么不是鱼?",
-                "为什么天空是蓝色的?讲简单一点",
-                "为什么鸡蛋煮熟会变硬?",
-                "为什么会有白天和黑夜?",
+                "Why is a whale not a fish?",
+                "Why is the sky blue? Keep it simple.",
+                "Why does a boiled egg get hard?",
+                "Why do we have day and night?",
             ],
             "fun": [
-                "讲一个关于蜜蜂的冷知识,要有趣",
-                "给我出一个3以内的数学口算题",
+                "Tell me a fun piece of trivia about bees.",
+                "Give me a quick mental-math problem with numbers under 3.",
             ],
         },
     },
     {
         "persona": "elderly",
-        "role": "初学者老奶奶学习使用手机",
+        "role": "Elderly first-time smartphone user",
         "domain": "life-help",
         "difficulty": 0,
         "intents": {
             "howto": [
-                "怎么在手机上用微信交电费?一步一步讲",
-                "手机声音太小了,怎么调大?",
-                "怎么把照片发给女儿?",
+                "How do I pay an electric bill with WeChat on my phone? Step by step, please.",
+                "My phone's sound is too quiet, how do I turn it up?",
+                "How do I send a photo to my daughter?",
             ],
             "health": [
-                "血压偏高平时要注意什么?说简单点",
-                "晚上睡不好,有什么生活小习惯能改善?",
+                "My blood pressure is a bit high, what should I watch out for? Keep it simple.",
+                "I'm sleeping badly at night; are there small habits that can help?",
             ],
         },
     },
     {
         "persona": "sales_manager",
-        "role": "销售经理准备季度汇报",
+        "role": "Sales manager prepping a quarterly review",
         "domain": "business",
         "difficulty": 1,
         "intents": {
             "summary": [
-                "把下面这段拜访记录总结成3条要点:\n{content}",
-                "本季度销量下滑20%,帮我分析可能的原因",
-                "给老板写一段一页纸的季度summary",
+                "Summarize this visit report into 3 key points:\n{content}",
+                "Sales dropped 20% this quarter, help me analyze the possible causes.",
+                "Write a one-page quarterly summary for my boss.",
             ],
             "email": [
-                "帮我写一封给客户的道歉信,语气诚恳不卑不亢",
-                "写一封跟供应商砍价的邮件,要礼貌又有理有据",
+                "Write a sincere but dignified apology letter to a client.",
+                "Write a polite but firm price-negotiation email to a supplier.",
             ],
             "analysis": [
-                "给一个销售漏斗报表设计3个最该看的指标",
+                "Pick the 3 metrics that matter most in a sales-funnel report.",
             ],
         },
     },
     {
         "persona": "data_analyst",
-        "role": "数据分析师处理一张业务表",
+        "role": "Data analyst working through a business table",
         "domain": "data",
         "difficulty": 2,
         "intents": {
             "sql": [
-                "写一个 SQL:统计每天订单量 top3 的城市",
-                "这段 SQL 慢,帮我分析慢在哪:\n{sql}",
+                "Write a SQL query: top 3 cities by daily order count.",
+                "This SQL is slow; help me analyze where the slowness is:\n{sql}",
             ],
             "stats": [
-                "A/B 实验 p=0.045,能下结论说新版更好吗?为什么",
-                "解释一下回归分析和相关分析的区别,给业务例子",
+                "A/B test with p=0.045 — can I conclude the new version is better? Why or why not?",
+                "Explain the difference between regression analysis and correlation analysis, with business examples.",
             ],
         },
     },
     {
         "persona": "medical_researcher",
-        "role": "医学科研助理检索文献",
+        "role": "Medical research assistant searching the literature",
         "domain": "medicine",
         "difficulty": 2,
         "intents": {
             "search": [
-                "帮我检索关于ai辅助诊断肺癌的综述,给出检索式",
-                "列5篇meta分析看看二甲双胍对心血管的作用",
+                "Help me search for reviews on AI-assisted lung-cancer diagnosis; give me the search query.",
+                "List 5 meta-analyses on metformin's cardiovascular effects so I can check them.",
             ],
             "explain": [
-                "解释一下ROC曲线,AUC接近1意味着什么?",
-                "混杂因素在观察性研究里会导致什么问题?",
+                "Explain the ROC curve: what does an AUC close to 1 mean?",
+                "What problems do confounding factors cause in observational studies?",
             ],
         },
     },
     {
         "persona": "founder",
-        "role": "初创公司创始人打磨商业计划",
+        "role": "Startup founder polishing a business plan",
         "domain": "startup",
         "difficulty": 1,
         "intents": {
             "pitch": [
-                "给我的AI客服SaaS写10秒电梯演讲",
-                "第一轮融资路演,最该强调哪3个数字?",
+                "Write a 10-second elevator pitch for my AI customer-support SaaS.",
+                "For our first funding round, which 3 numbers should I emphasize in the pitch?",
             ],
             "biz": [
-                "免费转付费的定价策略,给3种方案比较",
-                "对比自建模型 vs 用第三方LLM API 的成本账",
+                "Compare 3 pricing options for a free-to-paid conversion.",
+                "Break down the cost comparison of building our own model vs using a third-party LLM API.",
             ],
         },
     },
     {
         "persona": "translator",
-        "role": "本地化译者翻译产品文案",
+        "role": "Localization translator working on product copy",
         "domain": "translation",
         "difficulty": 1,
         "intents": {
             "translate": [
-                "把这句话翻成地道的英文:'我们的产品简单可靠,开箱即用。'",
-                "中译英:请用口语化的美式英语,不要太正式",
+                "Translate this into idiomatic English: 'Our product is simple, reliable, and works out of the box.'",
+                "Chinese to English: use conversational American English, not too formal.",
             ],
             "polish": [
-                "帮我润色这段产品介绍,更吸引人:\n{content}",
+                "Polish this product intro to make it more compelling:\n{content}",
             ],
         },
     },
     {
         "persona": "ml_engineer",
-        "role": "机器学习工程师搭建推理服务",
+        "role": "ML engineer standing up an inference service",
         "domain": "mlops",
         "difficulty": 2,
         "intents": {
             "serving": [
-                "对比 vLLM 和 llama.cpp 在 2xT4 上跑 27B 模型的取舍",
-                "什么是 continuous batching?对吞吐的影响多大?",
-                "TTFT 和 p95 延迟怎么取舍?给调参建议",
+                "Compare the trade-offs of vLLM vs llama.cpp for serving a 27B model on 2xT4.",
+                "What is continuous batching? How much does it affect throughput?",
+                "How should I trade off TTFT vs p95 latency? Give tuning advice.",
             ],
             "quant": [
-                "Q4_K_M 和 bf16 对 27B 模型的效果差异怎么评估?",
-                "KV cache 显存怎么估算?给公式",
+                "How do I evaluate the quality difference between Q4_K_M and bf16 for a 27B model?",
+                "How do I estimate KV-cache memory? Give me the formula.",
             ],
         },
     },
 ]
 
 INTENT_LABEL = {
-    "explain": "概念解释",
-    "prepare": "备课/整理",
-    "debug": "代码调试",
-    "design": "方案设计",
-    "why": "原理问答",
-    "fun": "趣味问答",
-    "howto": "操作指引",
-    "health": "健康生活",
-    "summary": "总结提炼",
-    "email": "邮件撰写",
-    "analysis": "指标分析",
-    "sql": "SQL 编写",
-    "stats": "统计推断",
-    "search": "文献检索",
-    "pitch": "路演表达",
-    "biz": "商业决策",
-    "translate": "翻译",
-    "polish": "润色",
-    "serving": "推理服务",
-    "quant": "量化评估",
+    "explain": "Concept explanation",
+    "prepare": "Lesson prep / organization",
+    "debug": "Code debugging",
+    "design": "Solution design",
+    "why": "How/why questions",
+    "fun": "Fun questions",
+    "howto": "Step-by-step help",
+    "health": "Healthy living",
+    "summary": "Summarization",
+    "email": "Email writing",
+    "analysis": "Metric analysis",
+    "sql": "SQL writing",
+    "stats": "Statistical inference",
+    "search": "Literature search",
+    "pitch": "Pitching",
+    "biz": "Business decisions",
+    "translate": "Translation",
+    "polish": "Polishing",
+    "serving": "Inference serving",
+    "quant": "Quantization eval",
 }
 
 FILLERS = {
     "code": [
-        "def add(a, b):\n    return a+b\n\nprint(add(1))  # 预期 3?",
+        "def add(a, b):\n    return a+b\n\nprint(add(1))  # expected 3?",
         "import os\nfiles = os.listdir('.')\nprint(file)\n# NameError: name 'file' is not defined",
-        "try:\n    x = 1 / 0\nexcept:\n    pass\n# 异常被吞了,怎么改?",
+        "try:\n    x = 1 / 0\nexcept:\n    pass\n# the exception is swallowed, how to fix?",
     ],
     "sql": [
         "SELECT * FROM orders JOIN users ON orders.uid=users.id\nWHERE orders.dt > '2026-01-01' ORDER BY created_at;",
@@ -231,9 +231,9 @@ FILLERS = {
         "SELECT date_trunc('day', created_at) d, COUNT(*) FROM events WHERE type='click' GROUP BY d;",
     ],
     "content": [
-        "周三拜访了华南区大客户,对方对价格有顾虑,对我们的交付周期比较满意;约定下周再报一轮方案。",
-        "上海渠道商反馈竞品降价促销,我们合同还有2个月到期,续约率承压。",
-        "西南区新签3家代理,首单金额都不大,但试单意愿强烈。",
+        "Visited a key account in South China on Wednesday; the client is concerned about pricing but satisfied with our delivery timeline; agreed to send another proposal next week.",
+        "A Shanghai channel partner reported a competitor's promotional price cut; our contract expires in 2 months and the renewal rate is under pressure.",
+        "Signed 3 new agents in the Southwest region; first orders are small in value but their willingness to trial is strong.",
     ],
 }
 

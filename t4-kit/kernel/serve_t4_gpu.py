@@ -15,9 +15,22 @@ from pathlib import Path
 
 CFG = None  # __LAUNCHER_CONFIG__  (push_job.py replaces this line)
 
+def _kaggle_user() -> str:
+    for p in (os.environ.get("KAGGLE_CONFIG_DIR", "") + "/kaggle.json",
+              os.path.expanduser("~/.kaggle/kaggle.json")):
+        try:
+            return json.load(open(p))["username"]
+        except Exception:
+            pass
+    u = os.environ.get("KAGGLE_USERNAME")
+    if u:
+        return u
+    from kaggle.api.kaggle_api_extended import KaggleApi
+    return KaggleApi().config_values["username"]
+
 DEFAULTS = {
     # 2xT4 (Kaggle "GPU T4 x2", machine_shape=NvidiaTeslaT4) quantized serving.
-    "weights_dataset": "YOUR_KAGGLE_USER/qwen3-8-27b-q4-k-m-private",  # private mirror (16.46 GB)
+    "weights_dataset": _kaggle_user() + "/qwen3-8-27b-q4-k-m-private",  # private mirror (16.46 GB)
     "hf_model_id": "unsloth/Qwen3.8-27B-GGUF",                    # fallback download source
     "hf_file": "Qwen3.8-27B-UD-Q4_K_M.gguf",
     "served_model_name": "qwen3.8-27b",

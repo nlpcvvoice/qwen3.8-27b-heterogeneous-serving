@@ -11,7 +11,7 @@ PKG = ROOT / "tmp" / "kernel_pkg_gpu_probe"
 PATH_P = PKG / "probe_gpu_kernel.py"
 PATH_M = PKG / "kernel-metadata.json"
 
-USER = "YOUR_KAGGLE_USER"
+USER = kl._read_username()
 SLUG = "qwen38-gpu-probe"
 
 kl.login()

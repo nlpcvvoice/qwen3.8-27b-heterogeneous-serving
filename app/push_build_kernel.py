@@ -14,7 +14,7 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
 PKG = ROOT / "tmp" / "kernel_pkg"
 OUT = ROOT / "tmp" / "kernel_out"
-USER = "YOUR_KAGGLE_USER"
+USER = kl._read_username()
 SLUG = "qwen38-private-dataset-build"
 
 

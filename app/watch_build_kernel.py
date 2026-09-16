@@ -7,7 +7,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import kaggle_login as kl
 
 OUT = Path(__file__).resolve().parent.parent / "tmp" / "kernel_out"
-KID = "YOUR_KAGGLE_USER/qwen38-private-dataset-build"
+KID = f"{kl._read_username()}/qwen38-private-dataset-build"
 
 kl.login()
 while True:

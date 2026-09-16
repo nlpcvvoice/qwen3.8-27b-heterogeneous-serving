@@ -142,8 +142,20 @@ def _kaggle_live_status(slug):
     except Exception:
         return ""
 
-KERNELS = {"tpu": "YOUR_KAGGLE_USER/qwen38-tpu-serve",
-           "gpu": "YOUR_KAGGLE_USER/qwen38-gpu-serve"}
+def _kaggle_user() -> str:
+    for base in (os.environ.get("KAGGLE_CONFIG_DIR", ""), str(Path.home() / ".kaggle")):
+        try:
+            return json.load(open(base + "/kaggle.json"))["username"]
+        except Exception:
+            pass
+    u = os.environ.get("KAGGLE_USERNAME")
+    if u:
+        return u
+    raise SystemExit("Kaggle username unknown: set KAGGLE_USERNAME or ~/.kaggle/kaggle.json")
+
+
+KERNELS = {"tpu": f"{_kaggle_user()}/qwen38-tpu-serve",
+           "gpu": f"{_kaggle_user()}/qwen38-gpu-serve"}
 
 
 def launch(key):

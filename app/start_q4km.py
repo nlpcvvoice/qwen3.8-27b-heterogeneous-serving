@@ -19,7 +19,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 import kaggle_login as kl
 
-USER = "YOUR_KAGGLE_USER"
+USER = kl._read_username()
 SERVE = f"{USER}/qwen38-gpu-serve"
 STATE = ROOT / "tmp" / "kaggle-gpu-lab.json"
 OUT_JSON = ROOT / "tmp" / "opencode-q4km.json"

@@ -8,7 +8,7 @@ import kaggle_login as kl
 
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "tmp" / "kernel_out_gpu_probe"
-KID = "YOUR_KAGGLE_USER/qwen38-gpu-probe"
+KID = f"{kl._read_username()}/qwen38-gpu-probe"
 
 kl.login()
 while True:
