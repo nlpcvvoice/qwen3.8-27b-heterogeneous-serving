@@ -44,11 +44,11 @@ just read that one file for `endpoint` + `api_key`.
 | Tier | free primary | free fallback | paid single-card (serverless) |
 | Precision | bf16 full | GGUF Q4_K_M (4-bit) | BF16 (no quant) |
 | Engine | vLLM (XLA/TPU) | llama.cpp (CUDA sm_75) | SGLang (MTP NEXTN k=3, CUDA graphs) |
-| Context | 262144 | 98304 total / 24576 per slot (KV q8_0) | 262144 native (configured) |
+| Context | 262144 | 98304 total / 24576 per slot (KV q8_0) | 262,144 native (verified to 254,987) |
 | Single-stream decode | 126.8 tok/s | 13.6 tok/s | 44.2 tok/s (MTP) * |
 | Concurrency | vLLM continuous batching | 4 parallel slots | max-running-requests 8 (SGLang) |
-| Long-context (≥100k) | batched, ~1.6k prefill tok/s | not fit (98k cap) | 262,144 configured; long-context re-test pending |
-| Cold start | ~25 min | ~31 min (v4) | ~2.9 min (172 s, no snapshot) |
+| Long-context (≥100k) | batched, ~1.6k prefill tok/s | not fit (98k cap) | 254,987-tok prompt served (TTFT 30.8 s); prefill ~9.4k tok/s @113K |
+| Cold start | ~25 min | ~31 min (v4) | 2.6–3.1 min (156–186 s, no snapshot) |
 | Idle cost | free pool | free pool | $0 (min_containers=0) |
 | Why | max quality*throughput | any-time availability | production long-context + full-BF16 quality |
 
@@ -171,9 +171,9 @@ Client-visible topology for the three-leg setup:
                  free pool   │   paid tier (Modal serverless)
                        ┌───────┴───────┐
                        │               │
-        TPU v5e-8 ─── vLLM (bf16, 262k ctx, MTP4)    H200 ─── SGLang (BF16, 262k ctx, MTP)
-        ~126.8 tok/s single stream · 3.9 M tok KV     ~44.2 tok/s single (MTP NEXTN k=3)
-        ~25 min push→READY (XLA + weights)             ~2.9 min cold (no snapshot, 172 s)
+         TPU v5e-8 ─── vLLM (bf16, 262k ctx, MTP4)       H200 ─── SGLang (BF16, 262k ctx, MTP k=3)
+         ~126.8 tok/s single · 3.9 M tok KV              44.2 single · 200.4 tok/s @8-way concurrent
+         ~25 min push→READY (XLA + weights)              prefill ~9.4k tok/s @113K · 2.6–3.1 min cold
 ```
 
 ### Benchmark table
@@ -184,18 +184,18 @@ Client-visible topology for the three-leg setup:
 | Engine | vLLM (XLA/TPU) | llama.cpp (CUDA sm_75) | SGLang (MTP NEXTN k=3, CUDA graphs) |
 | Context window | 262,144 | 98,304 (KV q8_0, 4 slots) | 262,144 native (configured) |
 | Single-stream decode | 126.8 tok/s | 13.5 tok/s | 44.2 tok/s \* (median 39.8–44.5) |
-| TTFT (512-tok prompt) | ~0.13 s | ~2.9 s | 0.43 s |
-| 4-way concurrent (64 tok each) | n/a (batched) | 4 req / 4.5 s, 0 err | — (not re-measured under SGLang) |
-| 5-stream wall (512 tok each) | n/a (batched) | n/a (4 slots max) | — (vLLM-era 36 s, 5/5 ok †) |
-| 5-stream per-stream tokens | — | — | — (vLLM-era 457 each †) |
-| RPS (5 *concurrent* 512-tok streams, 100% succ) | — | — | — (vLLM-era 0.14 †) |
-| RPS (Locust, short 15-prompt pool) | 2.36 | 0.21 | — |
-| TTFT p50 / p95 (5-stream, 512-tok) | — | — | — (vLLM-era 6.2 / 14.4 s †) |
-| E2E p50 / p95 (5-stream, 512-tok) | — | — | — (vLLM-era 13.5 / 36.0 s †) |
-| Prefill, cold card — 7K / 28K / 113K prompt | 1,206 / 1,654 / 1,643 tok/s | — | — (vLLM-era 2,151 / 4,567 / 4,524 †) |
-| 256k-token prompt TTFT / total | (batched) | — (max 98k) | — (vLLM-era 44.9 s / 73 s †) |
-| Cold start (allocation → READY) | ~25 min | ~31 min | ~2.9 min (172 s, no snapshot) |
-| Error rate across every row | 0 % | 0 % | 0 % (measured rows) |
+| TTFT (512-tok prompt) | ~0.13 s | ~2.9 s | 0.35 s |
+| 4-way concurrent (64 tok each) | n/a (batched) | 4 req / 4.5 s, 0 err | 144.5 @2-way / 200.4 @8-way (128-tok burst; 4-way run 99.8 anomalous, ‡) |
+| 5-stream wall (512 tok each) | n/a (batched) | n/a (4 slots max) | 4.77 s (5 × 561-tok, 5/5 ok) |
+| 5-stream per-stream tokens | — | — | 561 each |
+| RPS (5 *concurrent* 512-tok streams, 100% succ) | — | — | 1.05 (5 × 561-tok) |
+| RPS (Locust, short 15-prompt pool) | 2.36 | 0.21 | 2.03 |
+| TTFT p50 / p95 (5-stream, 512-tok) | — | — | 0.352 / 0.417 s (Locust 5 VU) |
+| E2E p50 / p95 (5-stream, 512-tok) | — | — | 0.76 / 2.41 s (Locust 5 VU) |
+| Prefill, cold card — 7K / 28K / 113K prompt | 1,206 / 1,654 / 1,643 tok/s | — | 7,831 / 9,017 / 9,395 tok/s |
+| 256k-token prompt TTFT / total | (batched) | — (max 98k) | 30.8 s / 42.0 s (254,987 / 242,570 tok) |
+| Cold start (allocation → READY) | ~25 min | ~31 min | 2.6–3.1 min (156–186 s, no snapshot) |
+| Error rate across every row | 0 % | 0 % | 0 % |
 
 \* **Why H200 single-stream is 44.2 tok/s, and where the ceiling sits.** The TPU leg
 ships NVIDIA/Megatron MTP4 speculative decoding (each accepted step ≈4 tokens). The
@@ -206,19 +206,26 @@ weights once per token is memory-bandwidth-bound at ≈88 tok/s (~4.8 TB/s HBM3)
 "SGLang + MTP baseline", not "card ceiling". Sample count/method and the
 MTP-vs-greedy lossless A/B gate are part of the correctness verification (pending).
 
-† H200 rows marked "—" were not re-measured when the engine switched to SGLang on
-2026-09-14. Earlier vLLM-era figures (prefill 2,151 / 4,567 / 4,524 tok/s; 256k
-prompt TTFT/total 44.9 s / 73 s; 5-stream 36 s at 457 tok each; TTFT p50/p95
-6.2/14.4 s) are superseded and will be re-taken under the SGLang configuration.
+† H200 rows formerly marked "—" were re-measured on 2026-10-30 under SGLang 0.5.11
++ MTP NEXTN k=3 (isolated account, billed \$0.00). The vLLM-era figures they
+supersede (prefill 2,151 / 4,567 / 4,524 tok/s; 256k prompt TTFT/total 44.9 s / 73 s;
+5-stream 36 s at 457 tok each; TTFT p50/p95 6.2/14.4 s) are retired. MTP draft
+acceptance in these runs: 53.3–54.2 % (≈2.60–2.63 tokens per decode step).
 
-**How to read the table.** H200's real wins are **long-context** and **quality**, not raw
-single-stream throughput: it is the only leg here configured for the full 262,144
+‡ The 4-way concurrent run (128-tok burst, 2026-10-30) measured 99.8 tok/s
+aggregate — below the 2-way (144.5) and 8-way (200.4) values, i.e. non-monotonic
+in concurrency. It was flagged anomalous in the source bench data and is excluded
+from the headline figures; the 2-way/8-way values are used for the scaling claim.
+
+**How to read the table.** H200's real wins are **long-context**, **concurrent
+throughput** and **quality**: it is the only leg here configured for the full 262,144
 window on a single card (the TPU leg also fits 262k natively; the T4 leg cannot fit
->98k at all). Under the measured single-stream loads, H200 runs at 44.2 tok/s (MTP ON)
-vs 126.8 tok/s on the TPU leg — H200 pays that gap for stability, full-BF16 quality,
-and no free-quota cap (decisions record below). RPS must never be compared across
-output lengths here: TPU's 2.36 is a short-output batch pool; H200 concurrency rows
-are pending re-measurement under SGLang.
+>98k at all), it scales ~4.5× from 44.2 single-stream to 200.4 tok/s at 8-way
+concurrency (continuous batching + MTP), and it pays the single-stream gap vs the
+TPU leg (126.8 tok/s) for stability, full-BF16 quality and no free-quota cap
+(decisions record below). RPS must never be compared across output lengths here:
+TPU's 2.36 and H200's 2.03 are short-output Locust pools; H200's 1.05 is the
+5-concurrent 561-tok stream rate.
 
 **Recommendation matrix:** long-context / batched agent workloads ≥100k → H200 (paid,
 recommended production tier for these); low-latency single-stream with speculative
@@ -232,15 +239,28 @@ decoding → TPU (free); instant availability → T4 leg (free failover).
 | Precision | BF16 (no quant) | FP8-W8A8, AWQ/GPTQ | the paid tier is *quality* — closes the gap between free bf16 (TPU) and Q4 (T4) |
 | Engine | SGLang (MTP NEXTN k=3, CUDA graphs) | vLLM 0.28 (stock), TensorRT-LLM | SGLang matured a native MTP NEXTN + CUDA-graphs path for this hybrid linear-attention arch on Hopper → single-stream 14.8 → 44.2 tok/s with the in-checkpoint MTP head, no patchset; its OpenAI-compatible shim keeps all clients unchanged (what changed, 2026-09-14) |
 | Speculative decoding | MTP NEXTN k=3 (in-checkpoint) | off (stock vLLM) | in-checkpoint MTP head needs no patch; ~3× single-stream under SGLang (14.8 → 44.2 tok/s). Lossless-vs-greedy A/B gate is part of the kernel correctness verification |
-| Cold start | cold boot; triton/CUDA kernels pre-baked in image | vLLM SleepMode + GPU memory snapshot | the snapshot path proved fragile/failing in practice; pre-baked kernels reach READY in ~2.9 min (172 s) with no snapshot state to manage |
+| Cold start | cold boot; triton/CUDA kernels pre-baked in image | vLLM SleepMode + GPU memory snapshot | the snapshot path proved fragile/failing in practice; pre-baked kernels reach READY in 2.6–3.1 min (156–186 s) with no snapshot state to manage |
 | Context sizing | 262144 native | 131072 (half) | 256k is the model's `max_position_embeddings`; fits comfortably at ~8 GiB fp8 KV |
-| Availability | min_containers=0, scaledown_window=600 s, explicit stop | warm pool | no idle billing; ~2.9 min cold start to READY — fine for a paid tier used only when free legs are down |
+| Availability | min_containers=0, scaledown_window=600 s, explicit stop | warm pool | no idle billing; 2.6–3.1 min cold start to READY — fine for a paid tier used only when free legs are down |
 | Endpoint | OpenAI-compatible, no auth | custom wire protocol | clients (opencode, LangChain, OpenAI SDK) work as-is; indistinguishable from the free legs |
 
 **What this tier is not.** H200 here is a *quality and context* tier, not a raw-throughput
 tier. Even with MTP ON (44.2 tok/s), single-stream remains ~3× below the TPU leg's
-126.8 tok/s; matching that headroom is roadmap item 6 (aggregate-batch tok/s and
-multi-H200 TP=2), not the paid tier in this table.
+126.8 tok/s; matching that headroom is roadmap item 6 (multi-H200 TP=2), not the paid
+tier in this table. The 200.4 tok/s @8-way row is **aggregate** throughput on short
+128-tok bursts, not per-stream speed; "256k verified" holds for single-stream
+(≈2–3 concurrent full-256k prompts, not 8).
+
+### H200 engineering notes (measured 2026-10-30)
+
+| Item | Measured | Note |
+|---|---|---|
+| KV cache footprint | 64 KB/token | hybrid attention: 16 full-attention + 48 linear-attention layers |
+| KV pool | 714,258 tokens | ≈2.8 concurrent 256k prompts; 15.29 GB headroom on the 141 GB card |
+| MTP draft acceptance | 53.3–54.2 % | ≈2.60–2.63 tokens per decode step (NEXTN k=3) |
+| Prefill throughput | 7,831 / 9,017 / 9,395 tok/s | 7K / 28K / 113K prompts, cold card |
+| Long-context | TTFT 30.8 s @254,987 tok; 42.0 s total @242,570 tok | prefill 7.8 → 9.4k tok/s over 7K → 113K |
+| Cold-start breakdown | provider ~54 s · weights 26.1 s · CUDA-graph capture 65.4 s · init ~24 s | capture is the dominant single lever (snapshot/skip-capture = roadmap) |
 
 ## Scaling to an enterprise deployment
 
@@ -299,7 +319,7 @@ Secrets never enter this repository: tokens & runtime endpoint keys are kept in
 | Service endpoint registration | `tmp/current_services.json` + `register_service.py take/status` | delivered |
 | Load testing (Locust + TTFT/RPS/p95) | `loadtest/` — 5 VU run: TPU 0% error @ TTFT p95 172ms | delivered |
 | Containerized engine build (Docker + CUDA devel, nvcc on CPU, reproducible) | `engine-factory/` — offline `engine.tar.gz`, pinned `engine.sha` | delivered |
-| Paid Hopper serving (H200, BF16, 262k, serverless) | H200 tier — SGLang (MTP NEXTN k=3, CUDA graphs) + 2.9-min cold start + scale-to-zero ($0 idle), Modal | delivered |
+| Paid Hopper serving (H200, BF16, 262k, serverless) | H200 tier — SGLang (MTP NEXTN k=3, CUDA graphs) + 2.6–3.1-min cold start + scale-to-zero ($0 idle), Modal | delivered |
 | LLM observability (Langfuse/MLflow) | trace / cost-per-token / eval dashboards | planned |
 | LLM-as-judge evaluation | bf16 vs Q4 comparison suite | planned |
 
@@ -310,6 +330,6 @@ Secrets never enter this repository: tokens & runtime endpoint keys are kept in
 3. Saturation ramp 20-50 VU + LangGraph persona corpus
 4. LLM observability (Langfuse/MLflow) + bf16-vs-Q4 eval
 5. ~~Cache prebuilt llama-server binary to skip the 25-min in-kernel build~~ ✓ done — `engine-factory/` builds the identical binary in Docker (no GPU), `bootstrap_cache` feeds it in; cold build phase → cache-hit
-6. H200 paid-tier throughput: ~~MTP speculative decoding~~ ✓ done (SGLang MTP NEXTN k=3, 14.8 → 44.2 tok/s); next: aggregate-batch tok/s, ≥100k-context re-measure under SGLang, multi-H200 TP=2 for long-context scale
+6. H200 paid-tier throughput: ~~MTP speculative decoding~~ ✓ done (SGLang MTP NEXTN k=3, 14.8 → 44.2 tok/s); ~~≥100k-context + concurrency re-measure under SGLang~~ ✓ done 2026-10-30 (254,987-tok TTFT 30.8 s; 200.4 tok/s @8-way); next: multi-H200 TP=2, cold-start CUDA-graph-capture optimization
 
 `kaggle-tpu-lab/` is derived from [kaggle-tpu-lab](https://github.com/ARahim3/kaggle-tpu-lab) (MIT).
