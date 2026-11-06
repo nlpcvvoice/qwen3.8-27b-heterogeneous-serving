@@ -262,6 +262,74 @@ tier in this table. The 200.4 tok/s @8-way row is **aggregate** throughput on sh
 | Long-context | TTFT 30.8 s @254,987 tok; 42.0 s total @242,570 tok | prefill 7.8 → 9.4k tok/s over 7K → 113K |
 | Cold-start breakdown | provider ~54 s · weights 26.1 s · CUDA-graph capture 65.4 s · init ~24 s | capture is the dominant single lever (snapshot/skip-capture = roadmap) |
 
+## GLM-5.3-Flash bench — Modal B300 / H200 (2026-11-06)
+
+Separate model from the Qwen3.8-27B trio above, on the same Modal paid tier:
+**GLM-5.3-Flash**, W4A16 (humming) — 177.72 GiB across 11 safetensors shards.
+Live-endpoint measurements only; no financial/accounting data included, by policy.
+
+### B300 × 1
+
+| Category | Metric | Result | Notes |
+|---|---|---|---|
+| Config | Hardware | 1× NVIDIA B300 SXM6 AC, 288 GB | tensor-parallel = 1 |
+| Config | Weight quantization | GLM-5.3-Flash W4A16 (humming), 177.72 GiB / 11 shards | — |
+| Config | Engine | vLLM 0.32.0 + MTP×2 | attention auto-selected → FLASHINFER_MLA; MoE = MARLIN |
+| Config | Context window | 1,048,576 (1M) | reported by /v1/models |
+| Startup | Cold start (3rd start) | **586 s** | allocation → /health 200; JIT cache volume warm |
+| Startup | Cold start (4th start) | **~7.5–7.8 min** | via one-click desktop launcher |
+| Startup | Deploy time (image cache hit) | **35 s** | 4th start |
+| Startup | 1M KV on a single card | **fits** (engine allocated the 1M KV pool and booted, verified twice) | — |
+| Perf | 128k prefill | **12.0 s ≈ 10.7k tok/s** (smoke); **11,378.7 tok/s** (engine log) | two independent measurements |
+| Perf | Single-stream decode tok/s | not measured | pending (tier-A suite) |
+| Perf | prefill ladder 7k/28k/113k | not measured | pending (tier-A suite) |
+| Perf | 256k TTFT | not measured | pending (tier-A suite) |
+| Perf | 840k TTFT (= 80% of 1M) | not measured | pending (tier-A, final block by design) |
+| Perf | concurrency / Locust | not measured | pending (tier-B) |
+| MTP | acceptance rate | **70%** (30 drafted / 21 accepted) | 15 smoke requests |
+| MTP | per-position acceptance | pos0 80% (12/15), pos1 60% (9/15) | same sample |
+| MTP | effective output | **~2.4 tokens/step** | — |
+| MTP | engine-log short samples | 41.7% (5/12), 62.5% (5/8) | 4th start, reference only |
+| Smoke | auth gate | unauthenticated → 401 (no wake); authenticated → 503 → 200 | — |
+| Smoke | model list | 1 model registered, max_model_len 1,048,576 | — |
+| Smoke | short request | OK (responses '323' / '4') | — |
+| Smoke | KV occupancy (peak) | ≤ 1.4% during smoke | engine log |
+| E2E | opencode chat | "你好" OK (two different snapshots hitting the same backend) | — |
+| Incident | toolchain ICE | resolved via prebuilt JIT cache; affected 2 starts, does not affect data conclusions | on record |
+
+### H200 × 2
+
+| Category | Metric | Result | Notes |
+|---|---|---|---|
+| Config | Hardware | 2× H200 (141 GB HBM3 each) | tensor-parallel = 2 |
+| Config | Weight quantization | GLM-5.3-Flash W4A16 (humming), 177.72 GiB / 11 shards (same source as B300) | — |
+| Config | Engine | vLLM 0.32.0 + MTP×2 | attention explicit FLASH_ATTN_MLA_SPARSE; MoE = humming/NVRTC |
+| Config | Context window | 1,048,576 (1M) | configured |
+| Startup | Cold start (first start, incl. image build) | **11.3 min** | allocation → ready |
+| Startup | 1M serving | verified at 128k; not stressed beyond | — |
+| Perf | 128k prefill | **10.0 s ≈ 12.8k tok/s** | 2-card aggregate |
+| Perf | Single-stream decode tok/s | not measured | bench deferred |
+| Perf | hello latency | **0.3 s** | 28 reasoning tokens (glm45 parser active) |
+| Perf | prefill ladder / 256k | not measured | bench deferred |
+| Perf | concurrency / Locust | not measured | bench deferred |
+| MTP | acceptance rate | **76%** (165/216) | — |
+| MTP | effective output | **2.53 tokens/step** | — |
+| MTP | reference (repo Qwen H200 baseline, NEXTN k=3) | 53.3–54.2% / ~2.6 tokens/step | quoted from the reference repo, not re-measured |
+| E2E | opencode chat | "你好" OK (user-verified) | — |
+| Deployment trait | idle behavior | platform keep-alive probing → deployed endpoint does not auto-scale-to-zero; explicit stop verified effective | — |
+
+### Cross-check (same-metric rows)
+
+| Metric | B300 × 1 | H200 × 2 |
+|---|---|---|
+| 128k prefill | 10.7–11.4k tok/s | 12.8k tok/s |
+| MTP acceptance / tokens·step⁻¹ | 70% / ~2.4 | 76% / 2.53 |
+| Cold start | 586 s – ~7.8 min (warm caches) | 11.3 min (first start) |
+| 1M ctx single-card | fits (288 GB single card) | n/a (2 cards) |
+
+*All "not measured" rows mark data completeness, not failures. No account, balance,
+or spend information is contained in this section by design.*
+
 ## Scaling to an enterprise deployment
 
 This repo runs on Kaggle's free quota (TPU ~20 h/wk, GPU ~30 h/wk, keepalive-limited
