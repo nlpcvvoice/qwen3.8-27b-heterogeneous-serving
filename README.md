@@ -330,35 +330,47 @@ Live-endpoint measurements only; no financial/accounting data included, by polic
 *All "not measured" rows mark data completeness, not failures. No account, balance,
 or spend information is contained in this section by design.*
 
-## GLM-5.3-Flash bench — Kaggle TPU v5e-8 (2026-11-12)
+## GLM-5.3-Flash bench — Kaggle TPU v5e-8 (2026-11-12, completed 2026-11-19)
 
 Same GLM-5.3-Flash model as the Modal pair above, served on this repo's
-existing free TPU leg (v5e-8). Low-risk online scope only: single-request
-serial, `max_tokens` ≤1024, 3 s between requests, service session untouched;
-no stress, soak, 256k-full, or high-concurrency throughput runs.
+existing free TPU leg (v5e-8). Two-phase campaign: (1) a low-risk online pass
+(single-request serial, `max_tokens` ≤1024, 3 s between requests) and (2) a
+full-performance pass (concurrency, prefill fill-in, 256k saturation, soak),
+run in ascending risk order with health checks between steps and abort on
+anomaly. ~590+ requests across the campaign: zero engine crashes, zero service
+interruption.
 
 | Category | Metric | Result | Notes |
 |---|---|---|---|
-| Config | Hardware | TPU v5e-8 (Kaggle free tier) | single-request serial, max_tokens ≤1024 |
-| Config | Context window | 262,144 | verified; 256k full-stress not run |
-| Decode | Single-stream short decode (244 tok) | **99.7 tok/s** | — |
+| Config | Hardware | TPU v5e-8 (Kaggle free tier) | — |
+| Config | Context window | 262,144 nominal; ~150k practical over the public tunnel | 256k reachable only in-kernel (see 256k row) |
+| Decode | Sustained decode (1024 tok, counting task) | **214.3 tok/s** | all answers correct |
+| Decode | Streaming decode (excl. TTFT) | **236.2 tok/s** | — |
+| Decode | 1-way baseline (256 tok) | 154.1 tok/s | — |
+| Decode | 2-way aggregate | **168.3 tok/s (+9 %)** | near-serial decode; concurrency does not buy throughput on this engine |
 | Decode | Effort ladder low / medium / high | **147.8 / 198.1 / 165.4 tok/s** | all three answers correct |
-| Decode | Band (small sample) | 100–198 tok/s (median ~150) | sample-noise band |
 | Decode | "你好" smoke | 141.3 tok/s (0.86 s) | — |
-| Prefill | TTFT @352 tok | **0.34 s** (≈1,036 tok/s) | — |
+| Prefill | TTFT @352 tok (SSE first chunk) | **0.37 s** | 11-12 probe: 0.34 s |
+| Prefill | small ladder 594 / 1,144 / 2,260 tok | TTFT 0.88 / 0.73 / 0.86 s; 678 / 1,572 / **2,627 tok/s** | short-prompt overhead amortizes with length |
 | Prefill | 7,602 tok | 3.83 s → **1,985 tok/s** | — |
 | Prefill | 30,372 tok | 15.65 s → **1,941 tok/s** | — |
+| Prefill | 34,140 tok | 21.3 s → **1,603 tok/s** | — |
+| Prefill | 68,268 tok | 44.9 s → **1,522 tok/s** | — |
 | Prefill | 122,694 tok | 77.7 s → **1,578 tok/s** | ~20 % long-context degradation |
-| Concurrency | 2-way / 3-way short requests | ✅ all succeeded | TTFT jitter high; throughput not reported |
-| Functional | Tool-call | ✅ `tool_calls` emitted (list_files, 12 tok) | — |
+| Prefill | Law | ≈0.66 ms/tok linear; 1.5–2.0k tok/s plateau | 122k ≈ 80 s, predictable |
+| Saturation | 4-way (8k prefill + 256 tok decode each) | 4/4, 0 errors; wall 20.4 s (15.0 / 17.7 / 19.7 / 20.4 s) | prefill serialized, graceful queueing |
+| Soak | 12 min, 2-way continuous | **572 requests, 0 errors**; p50 1.5 s, max 2.4 s | no drift, no preemption signs |
+| 256k full | ~247k prompt via public tunnel | HTTP 524 (100 s tunnel timeout); engine still computing | **practical tunnel ceiling ≈150k tok** (100 s ÷ 0.66 ms/tok) |
+| Functional | Tool-call / json_mode / seed / stop | ✅ all (stop: one-off 500 on first probe, 2/2 retests pass) | client should retry once |
 | Functional | Auth gate | ✅ 401 authentication_error on invalid key | — |
-| Functional | Error rate | **0 %** (6/6+) | — |
+| Functional | Context > 262,144 | ✅ clean 400 self-check | — |
+| Functional | temperature=2 | ⚠️ empty content (finish=length) | keep ≤1.5 in production |
+| Functional | Error rate | **0 %** across ~590+ requests | — |
 | Startup | Mount throughput | 367.4 MB/s | — |
 | Startup | Weight load | 13.7 min | — |
 | Startup | Compile + warmup (cold path) | 27.4 min | — |
 | Startup | Cold start end-to-end | ~45 min (v3); ~15–18 min after v4 cache | — |
-| Not measured | MTP acceptance | blocked (platform log channel empty) | — |
-| Not measured | Stress / soak / 256k full / high-concurrency throughput | not run (outside approved scope) | — |
+| Not measured | MTP acceptance | blocked (platform log channel empty) | platform limitation |
 
 ### Cross-check vs repo Qwen3.8-27B on the same TPU v5e-8
 
@@ -367,20 +379,24 @@ no stress, soak, 256k-full, or high-concurrency throughput runs.
 | Prefill 7,602 tok | 1,985 tok/s | 1,206 tok/s | GLM +65 % |
 | Prefill 30,372 tok | 1,941 tok/s | 1,654 tok/s | GLM +17 % |
 | Prefill 122,694 tok | 1,578 tok/s | 1,643 tok/s | ≈ tie (GLM -4 %) |
-| Single-stream decode | 99.7–198 tok/s (median ~150) | 126.8 tok/s | band covers |
+| Single-stream decode (1-way) | 214.3 sustained / 236.2 streaming | 126.8 tok/s | GLM +69–86 % |
 | Tool-call | ✅ | ✅ | tie |
-| Context | 262,144 | 262,144 | tie |
+| Context | 262,144 (≈150k over tunnel) | 262,144 | tie (nominal) |
 | Cold start | ~45 min (v3); ~15–18 min (v4) | ~22 min (repo) | Qwen (repo value) |
 
 Qwen values quoted from this repo's Qwen3.8-27B TPU benchmark (2026-09), not
 re-measured under identical conditions.
 
-**Profile:** strong for long-document / large-repo injection tasks (1.6–2.0k tok/s
-prefill); medium for high-frequency short Q&A (single-stream band); usable for
-tool-calling agents.
+**Profile:** strong for long-document / large-repo injection (≤150k over the
+tunnel, 256k in-kernel; 1.5–2.6k tok/s prefill); medium for high-frequency short
+Q&A (154–236 tok/s single-stream); fully usable for tool-calling agents
+(stop / json_mode / seed verified); **not** a fit for high-concurrency throughput
+(2-way +9 %, near-serial decode); soak-verified for long-running tasks (572
+requests, 0 errors, no drift).
 
-*All "not measured" rows mark data completeness, not failures. No account,
-balance, or spend information is contained in this section by design.*
+*The one remaining "not measured" row marks data completeness, not failures.
+No account, balance, or spend information is contained in this section by
+design.*
 
 ## Scaling to an enterprise deployment
 
